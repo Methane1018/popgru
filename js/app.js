@@ -1,11 +1,11 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js';
+import * as S from './store.js?v=3';
 import {
   TUNING, ITEMS, MILESTONES, HATS, SILLY_HATS,
   ACCESS, DEFAULT_GRU_NAME,
-} from './config.js';
+} from './config.js?v=3';
 
 const $  = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag);
