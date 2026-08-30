@@ -199,6 +199,11 @@
   .skin-btn.on{border-color:var(--accent); box-shadow:0 0 0 2px var(--accent) inset}
   .skin-btn.locked{opacity:.35; cursor:default}
   .skin-btn.poor{opacity:.55}
+  /* 底部確認列：真正花錢的按鈕只出現在這裡 */
+  .skin-bar{position:sticky; bottom:0; margin-top:10px; padding:12px 2px calc(8px + env(safe-area-inset-bottom));
+            background:var(--sheet); border-top:1px solid var(--line);
+            display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+  .skin-bar-note{flex:1; min-width:140px; font-size:12.5px; color:var(--muted); font-weight:600; line-height:1.5}
 
   /* 提示固定在標題列正下方。放在畫面底部會蓋住商店／信箱那排按鈕，
      放在這裡最多只擋到一行說明文字，而且面板打開時也不會擋到內容。 */
@@ -283,6 +288,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=0.5.0"></script>
+<script type="module" src="js/app.js?v=0.5.1"></script>
 </body>
 </html>

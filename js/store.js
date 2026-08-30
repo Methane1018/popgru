@@ -8,7 +8,7 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
-} from './config.js?v=0.5.0';
+} from './config.js?v=0.5.1';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -296,8 +296,14 @@ async function onSignedIn(user) {
         helpToday:d.helpToday||0, helpDay:d.helpDay||null,
         freezes:d.freezes||0, double:d.double||0,
       });
-      state.me.loaded = true;      // 有了這個，flush() 才會開始寫回這些欄位
-      if (repairStreak()) queuePatch({ streak: state.me.streak, bestStreak: state.me.bestStreak });
+      state.me.loaded = true;      // 有了這個，flush() 才會開始寫
+      repairStreak();
+      const m = state.me;
+      console.log('POPGRU 讀到個人資料：',
+        `連勝=${m.streak} 最後一天=${m.lastDay} 今日=${m.todayCount} ` +
+        `幫忙=${m.helpToday}/${m.helpDay} 凍結卡=${m.freezes} 雙倍=${m.double} ` +
+        `魚=${m.fish} 累計=${m.lifetime}`);
+      flush();                     // 資料到齊，把等在門口的寫入放行
     }
     sync();
   }, e => console.warn('讀取個人資料失敗：', e));
@@ -480,6 +486,11 @@ const queuePatch = p => { pendPatch = { ...(pendPatch||{}), ...p }; };
 
 export async function flush() {
   if (state.mode !== 'member' || !fb) return;
+  // 個人資料還沒讀進來就先不要寫。
+  // 之前是「照寫，但跳過絕對值欄位」，那留下一個窗口：只要有一次 flush 落在
+  // 這個窗口裡，連續天數／凍結卡／幫忙額度就整批不會被寫出去。
+  // 乾脆等資料到齊再寫 —— 點擊本來就有待送匣墊著，不會掉。
+  if (!state.me.loaded) { scheduleFlush(); return; }
   // 前一次還在送就晚點再試。少了這個重排，送出期間累積的點擊
   // 要等 8 秒的保底定時器才會被撿走，剛好卡在「壓完馬上關掉」的空隙。
   if (flushing) { scheduleFlush(); return; }
@@ -492,14 +503,14 @@ export async function flush() {
   const { F, db } = fb, me = state.me;
   try {
     const b = F.writeBatch(db);
-    // 絕對欄位只有在個人資料真的讀進來之後才寫回去。
-    // 否則補送時（快照還沒回來）會把連續天數、凍結卡、雙倍卡全部覆寫成 0。
-    const p = { lastSeen: F.serverTimestamp(), ...(patch || {}) };
-    if (me.loaded) Object.assign(p, {
+    // 走到這裡代表個人資料一定讀進來了（上面擋掉了），所以絕對欄位一律寫回去。
+    const p = {
+      lastSeen: F.serverTimestamp(),
       streak: me.streak, bestStreak: me.bestStreak, lastDay: me.lastDay,
       todayCount: me.todayCount, helpToday: me.helpToday, helpDay: me.helpDay,
       freezes: me.freezes, double: me.double,
-    });
+      ...(patch || {}),
+    };
     if (n)    p.lifetime = F.increment(n);
     if (fish) p.fish     = F.increment(fish);
     if (gold) p.goldfish = F.increment(gold);
@@ -519,6 +530,8 @@ export async function flush() {
     }
     await b.commit();
     if (n || fish || gold) outboxSettle(me.uid, target, n, fish, gold);   // 確定寫進去了才扣
+    console.log(`POPGRU 已寫入 +${n} 下 · 連勝=${me.streak} 幫忙=${me.helpToday} ` +
+                `凍結卡=${me.freezes} 雙倍=${me.double}`);
   } catch (e) {
     console.warn('寫入失敗，稍後重試：', e);
     state.pending += n; pendFish += fish; pendGold += gold;

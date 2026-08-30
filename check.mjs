@@ -17,7 +17,7 @@ const check = (name, ok, detail = '') => {
 // 1) flush() 寫回的絕對欄位，必須跟第一次快照讀進來的欄位一字不差。
 //    少一邊就會出現「幫忙額度自己跳回 300」「連續天數歸零」。
 {
-  const w = store.match(/if \(me\.loaded\) Object\.assign\(p, \{(.*?)\}\);/s);
+  const w = store.match(/const p = \{\s*lastSeen: F\.serverTimestamp\(\),(.*?)\.\.\.\(patch/s);
   const r = store.match(/if \(first\) \{\s*Object\.assign\(state\.me, \{(.*?)\}\);/s);
   if (!w || !r) check('flush 與快照的絕對欄位區塊都存在', false, '找不到其中一段');
   else {
@@ -30,6 +30,9 @@ const check = (name, ok, detail = '') => {
   }
   const n = (store.match(/state\.me\.loaded = true/g) || []).length;
   check('me.loaded 恰好被設 true 一次', n === 1, `${n} 次`);
+  // 這一條是關鍵：個人資料沒讀到就絕對不能寫，否則會把初始值 0 覆寫上去
+  check('flush 會等個人資料載入', /if \(!state\.me\.loaded\) \{ scheduleFlush\(\); return; \}/.test(store));
+  check('載入完會主動放行一次 flush', /state\.me\.loaded = true[\s\S]{0,400}?flush\(\);/.test(store));
 }
 
 // 2) 待送匣讀寫格式要對得上（曾經一邊寫舊格式、一邊讀新格式，補送整個失效）

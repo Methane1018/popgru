@@ -1,12 +1,12 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.5.0';
+import * as S from './store.js?v=0.5.1';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
-} from './config.js?v=0.5.0';
+} from './config.js?v=0.5.1';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -256,7 +256,8 @@ function render() {
     : helpLeft > 0          ? `${v.ownerName} 的格魯 · 今天還能幫 ${nf(helpLeft)} 下`
                             : `${v.ownerName} 的格魯 · 今天幫忙的額度用完了`;
   document.body.classList.toggle('visiting', !v.isMine);
-  applySkin(v.skin);                      // 看誰家就套誰的外觀
+  // 看誰家就套誰的外觀；自己家在試外觀時顯示預覽
+  applySkin(v.isMine && skinPreview ? { ...v.skin, ...skinPreview } : v.skin);
   hatEl.textContent = v.hat || '';
   hatEl.hidden = !v.hat;
 
@@ -313,6 +314,7 @@ function refreshPanel(name) {
   if (openPanel === name && !subView) renderPanel(name);
 }
 function closePanel() {
+  clearSkinPreview();                 // 沒按確認就離開＝不要那個預覽
   openPanel = null; subView = false;
   document.body.classList.remove('sheet-open');
   $('sheet').classList.remove('open');
@@ -330,49 +332,111 @@ function renderPanel(name) {
 }
 
 /* --- 外觀 --- */
+// 點選只是「預覽」，不會扣錢。要按下面那條的按鈕才真的買 / 換。
+// 直接點就買太容易誤觸了。
+let skinPreview = null;
+
+function skinPickerState() {
+  const cur = { ...defaultSkin(), ...(S.state.myGru.skin || {}) };
+  const sel = { ...cur, ...(skinPreview || {}) };
+  const toBuy = SKIN_KINDS.map(({ k }) => ({ k, id: sel[k] }))
+                          .filter(({ k, id }) => !S.ownsSkin(k, id));
+  const cost = toBuy.reduce((a, { k, id }) => a + skinInfo(k, id).cost, 0);
+  const changed = SKIN_KINDS.some(({ k }) => sel[k] !== cur[k]);
+  return { cur, sel, toBuy, cost, changed };
+}
+
+function clearSkinPreview() {
+  if (!skinPreview) return;
+  skinPreview = null;
+  applySkin(S.state.viewing.skin);        // 還原成真正存起來的樣子
+}
+
 function showSkinPicker() {
   subView = true;
   const body = $('sheetBody'); body.innerHTML = '';
   $('sheetTitle').textContent = '外觀';
-  const st = S.state, cur = { ...defaultSkin(), ...(st.myGru.skin || {}) };
+  const st = S.state;
+  const { cur, sel, toBuy, cost, changed } = skinPickerState();
 
   body.append(el('p', 'hint-sm',
-    `你有 🐟 ${nf(st.me.fish)}。解鎖一次就永久擁有，之後換來換去免費。` +
-    `外觀是掛在格魯身上的，朋友來你家就會看到。`));
+    `你有 🐟 ${nf(st.me.fish)}。點一下只是試看看，要按最下面的按鈕才會真的買或換。` +
+    `外觀掛在格魯身上，朋友來你家就會看到。`));
 
   for (const { k, label } of SKIN_KINDS) {
     body.append(el('p', 'note', label));
     const grid = el('div', 'grid');
     for (const item of SKINS[k]) {
-      const owned  = S.ownsSkin(k, item.id);
-      const locked = S.skinLocked(k, item.id);
-      const on     = cur[k] === item.id;
+      const owned    = S.ownsSkin(k, item.id);
+      const locked   = S.skinLocked(k, item.id);
+      const selected = sel[k] === item.id;
+      const inUse    = cur[k] === item.id;
 
       const cell = el('div', 'hat-cell');
-      const b = el('button', 'skin-btn' + (on ? ' on' : '') + (locked ? ' locked' : ''));
+      const b = el('button', 'skin-btn' + (selected ? ' on' : '') + (locked ? ' locked' : ''));
       b.append(el('span', 'skin-name', item.name));
       b.title = item.name;
       if (locked) {
         b.disabled = true;
         cell.append(b, el('span', 'hat-need', nf(item.need)));
-      } else if (owned) {
-        b.onclick = async () => {
-          try { await S.setSkin(k, item.id); toast(`換成「${item.name}」`); showSkinPicker(); }
-          catch (e) { toast(e.message); }
-        };
-        cell.append(b, el('span', 'hat-need', on ? '使用中' : '免費'));
       } else {
-        if (st.me.fish < item.cost) b.classList.add('poor');
-        b.onclick = async () => {
-          try { await S.buySkin(k, item.id); toast(`解鎖「${item.name}」，已經換上`); showSkinPicker(); }
-          catch (e) { toast(e.message); }
+        b.onclick = () => {                       // 只預覽，不扣錢
+          skinPreview = { ...(skinPreview || {}), [k]: item.id };
+          applySkin({ ...cur, ...skinPreview });
+          showSkinPicker();
         };
-        cell.append(b, el('span', 'hat-need', `${item.cost} 🐟`));
+        if (!owned && st.me.fish < item.cost) b.classList.add('poor');
+        cell.append(b, el('span', 'hat-need',
+          inUse ? '使用中' : owned ? '已擁有' : `${item.cost} 🐟`));
       }
       grid.append(cell);
     }
     body.append(grid);
   }
+
+  // ── 底部確認列：真正花錢的地方只有這裡 ──
+  const bar = el('div', 'skin-bar');
+  if (!changed) {
+    bar.append(el('span', 'skin-bar-note', '點上面的樣式試看看，這裡會出現購買按鈕'));
+  } else {
+    const names = SKIN_KINDS.filter(({ k }) => sel[k] !== cur[k])
+                            .map(({ k }) => skinInfo(k, sel[k]).name).join('、');
+    if (toBuy.length) {
+      const poor = st.me.fish < cost;
+      bar.append(el('span', 'skin-bar-note',
+        `預覽中：${names}　未擁有 ${toBuy.length} 項`));
+      const buy = el('button', 'btn primary' + (poor ? '' : ''), `購買並使用 · ${cost} 🐟`);
+      buy.disabled = poor;
+      if (poor) buy.title = '魚不夠';
+      buy.onclick = async () => {
+        buy.disabled = true;
+        try {
+          for (const { k, id } of toBuy) await S.buySkin(k, id);       // 先解鎖
+          for (const { k } of SKIN_KINDS) if (sel[k] !== cur[k]) await S.setSkin(k, sel[k]);
+          skinPreview = null;
+          toast(`買下並換上「${names}」`);
+          showSkinPicker();
+        } catch (e) { toast(e.message); buy.disabled = false; }
+      };
+      bar.append(buy);
+    } else {
+      bar.append(el('span', 'skin-bar-note', `預覽中：${names}　都已經擁有`));
+      const use = el('button', 'btn primary', '換上這一套');
+      use.onclick = async () => {
+        try {
+          for (const { k } of SKIN_KINDS) if (sel[k] !== cur[k]) await S.setSkin(k, sel[k]);
+          skinPreview = null;
+          toast(`換成「${names}」`);
+          showSkinPicker();
+        } catch (e) { toast(e.message); }
+      };
+      bar.append(use);
+    }
+    const undo = el('button', 'btn', '還原');
+    undo.onclick = () => { clearSkinPreview(); showSkinPicker(); };
+    bar.append(undo);
+  }
+  body.append(bar);
 }
 
 /* --- 更新內容 --- */
