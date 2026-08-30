@@ -143,8 +143,9 @@
   .grid{display:flex; flex-wrap:wrap; gap:8px; margin:4px 0}
   .emoji-btn{appearance:none; width:52px; height:52px; font-size:26px; line-height:1; cursor:pointer;
              border-radius:14px; border:1px solid var(--line); background:var(--card)}
-  .emoji-btn.on{border-color:var(--accent); background:var(--bg-2)}
+  .emoji-btn.on{border-color:var(--accent); background:var(--bg-2); box-shadow:0 0 0 2px var(--accent) inset}
   .emoji-btn.locked{opacity:.3; cursor:default}
+  .emoji-btn.poor{opacity:.55}          /* 買得到，但魚不夠 */
 
   .toast{position:fixed; left:50%; bottom:calc(18px + env(safe-area-inset-bottom));
          transform:translate(-50%,14px); z-index:30; max-width:min(440px,92vw);
@@ -229,6 +230,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=7"></script>
+<script type="module" src="js/app.js?v=8"></script>
 </body>
 </html>

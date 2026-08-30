@@ -22,7 +22,7 @@ export const firebaseConfig = {
 
 // 目前版本。載入時會印在主控台，用來確認朋友拿到的是不是新版。
 // 跑 ./bump.sh 會自動加一（同時更新所有 import 上的 ?v=）。
-export const APP_VERSION = 7;
+export const APP_VERSION = 8;
 
 // Firebase SDK 版本。萬一載入失敗，改這個數字就好。
 export const FIREBASE_VERSION = '11.6.0';
@@ -75,7 +75,7 @@ export const ITEMS = {
   note:   { emoji:'💌', name:'紙條',     cost:  8, give:true, text:true, desc:'留一句話，30 字以內' },
   fish:   { emoji:'🐟', name:'送魚',     cost: 25, give:true, gives:20,  desc:'對方收到 20 條魚（虧本，但是心意）' },
   freeze: { emoji:'🧊', name:'凍結卡',   cost: 60, give:true, self:true, desc:'漏掉一天時自動用掉，保住連續天數' },
-  hat:    { emoji:'🎩', name:'帽子',     cost: 60, give:true, self:true, hat:true, desc:'戴在企鵝頭上，名單也看得到' },
+  hat:    { emoji:'🎩', name:'帽子',     cost: 60, give:true, self:true, hat:true, desc:'解鎖後可以隨時免費換戴，送人也會幫對方解鎖' },
   double: { emoji:'⚡', name:'雙倍魚',   cost: 80, give:true, self:true, desc:'接下來 100 下拿雙倍魚（不影響每日上限）' },
   medal:  { emoji:'🏅', name:'金牌',     cost:  1, give:true, gold:true, desc:'用金魚買，永久掛在對方名字旁邊' },
 };
@@ -84,5 +84,24 @@ export const ITEMS = {
 // 格魯預設名字
 export const DEFAULT_GRU_NAME = '格魯';
 
-export const HATS = ['🎩','🎀','🧢','🕶','👑','🍄','🔥','🌈','💎'];
-export const SILLY_HATS = ['🍕','💩','🐛','🧻','🥑'];   // 一直都能用，純粹是要搞朋友
+// 帽子是「買一次永久解鎖」，之後換戴不用再付錢。
+//   cost = 解鎖要幾條魚
+//   need = 小圈子總壓扁數要到多少才買得到（0 = 隨時可買）
+// need 對應 MILESTONES 的門檻，兩邊要一起改。
+export const HATS = [
+  { e:'🎩', cost:  60, need:       0, name:'紳士帽' },
+  { e:'🎀', cost:  60, need:       0, name:'蝴蝶結' },
+  { e:'🍕', cost:  40, need:       0, name:'披薩' },
+  { e:'💩', cost:  40, need:       0, name:'便便' },
+  { e:'🐛', cost:  40, need:       0, name:'毛毛蟲' },
+  { e:'🧻', cost:  40, need:       0, name:'衛生紙' },
+  { e:'🥑', cost:  40, need:       0, name:'酪梨' },
+  { e:'🧢', cost:  80, need:    1000, name:'鴨舌帽' },
+  { e:'🕶', cost:  80, need:    5000, name:'太陽眼鏡' },
+  { e:'👑', cost: 150, need:   25000, name:'皇冠' },
+  { e:'🍄', cost: 150, need:  100000, name:'蘑菇' },
+  { e:'🔥', cost: 200, need:  250000, name:'火焰頭' },
+  { e:'🌈', cost: 200, need:  500000, name:'彩虹' },
+  { e:'💎', cost: 300, need: 1000000, name:'鑽石' },
+];
+export const hatInfo = e => HATS.find(h => h.e === e) || { e, cost: 60, need: 0, name: '帽子' };

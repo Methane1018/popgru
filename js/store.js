@@ -7,13 +7,14 @@
 // ============================================================================
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
-  ACCESS, INVITE_CODE, DEFAULT_GRU_NAME,
-} from './config.js?v=7';
+  ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo,
+} from './config.js?v=8';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
 const SEEN_KEY  = 'popgru.lastSeenGlobal';
 const POKE_KEY  = 'popgru.pokes';
+const OUTBOX_KEY = 'popgru.outbox';   // 還沒寫進 Firestore 的點擊，撐過關頁／重整／當掉
 const INVITE_OK = 'popgru.invited';
 
 export const configured = Object.keys(firebaseConfig).length > 0;
@@ -43,7 +44,7 @@ const emit = (evt, d) => listeners[evt]?.forEach(fn => { try { fn(d); } catch (e
 /* ----------------------------------------------------------------- state -- */
 const blankMe = () => ({
   uid:null, name:null, googleName:null, nick:null, photo:null,
-  lifetime:0, fish:0, goldfish:0, medals:0, freezes:0, double:0,
+  lifetime:0, fish:0, goldfish:0, medals:0, freezes:0, double:0, ownedHats:[],
   streak:0, bestStreak:0, lastDay:null, todayCount:0, helpToday:0, helpDay:null,
 });
 const blankGru = () => ({
@@ -84,10 +85,10 @@ function loadGuest() {
 }
 function saveGuest() {
   if (state.mode !== 'guest') return;
-  const { lifetime, fish, goldfish, streak, bestStreak, lastDay, todayCount, nick } = state.me;
+  const { lifetime, fish, goldfish, streak, bestStreak, lastDay, todayCount, nick, ownedHats } = state.me;
   try {
     localStorage.setItem(GUEST_KEY, JSON.stringify({
-      lifetime, fish, goldfish, streak, bestStreak, lastDay, todayCount, nick,
+      lifetime, fish, goldfish, streak, bestStreak, lastDay, todayCount, nick, ownedHats,
       gruName: state.myGru.name, gruHat: state.myGru.hat, gruSquashes: state.myGru.squashes,
     }));
   } catch {}
@@ -99,11 +100,46 @@ function applyGuest() {
     streak:g.streak||0, bestStreak:g.bestStreak||0,
     lastDay:g.lastDay||null, todayCount:g.todayCount||0,
     nick:g.nick||null, name:g.nick||null,
+    ownedHats: Array.isArray(g.ownedHats) ? g.ownedHats : [],
   });
   Object.assign(state.myGru, blankGru(), {
     name:g.gruName||DEFAULT_GRU_NAME, hat:g.gruHat||null, squashes:g.gruSquashes||0,
   });
   state.viewing = { ...state.myGru, isMine:true };
+}
+
+/* ------------------------------------------------------- 持久待送匣 -- */
+// flush() 是非同步的網路寫入，而瀏覽器在關頁時不會等它完成。
+// 所以待送的數量必須先落地在 localStorage：寫入成功才扣掉。
+// 這樣關分頁、重新整理、當掉、離線，通通不會掉資料。
+function outboxRead() {
+  try {
+    const o = JSON.parse(localStorage.getItem(OUTBOX_KEY) || 'null');
+    return (o && o.uid) ? o : null;
+  } catch { return null; }
+}
+function outboxWrite(o) {
+  try {
+    if (!o || (!o.n && !o.fish && !o.gold)) localStorage.removeItem(OUTBOX_KEY);
+    else localStorage.setItem(OUTBOX_KEY, JSON.stringify(o));
+  } catch {}
+}
+// 每次壓扁就累加（很小的物件，成本可以忽略）
+function outboxAdd(uid, target, n, fish, gold) {
+  const o = outboxRead();
+  if (o && o.uid === uid && o.target === target) {
+    o.n += n; o.fish += fish; o.gold += gold; outboxWrite(o);
+  } else {
+    // 換人家了：先把舊的送出去（下面 flush 會處理），這裡直接開新的一筆
+    outboxWrite({ uid, target, n, fish, gold });
+  }
+}
+// 寫入成功之後扣掉這次送出的量（期間可能又累積了新的點擊，所以是扣不是清空）
+function outboxSettle(uid, target, n, fish, gold) {
+  const o = outboxRead();
+  if (!o || o.uid !== uid || o.target !== target) return;
+  o.n -= n; o.fish -= fish; o.gold -= gold;
+  outboxWrite((o.n > 0 || o.fish > 0 || o.gold > 0) ? o : null);
 }
 
 /* --------------------------------------------------------------- firebase -- */
@@ -212,6 +248,11 @@ async function onSignedIn(user) {
     Object.assign(state.me, {
       lifetime:d.lifetime||0, fish:d.fish||0, goldfish:d.goldfish||0,
       medals:d.medals||0, freezes:d.freezes||0, double:d.double||0,
+      // 舊制買過的帽子（只存在 grus.hat）視同已解鎖，不能讓人白花錢
+      ownedHats: Array.from(new Set([
+        ...(Array.isArray(d.ownedHats) ? d.ownedHats : []),
+        ...(state.myGru.hat ? [state.myGru.hat] : []),
+      ])),
       streak:d.streak||0, bestStreak:d.bestStreak||0,
       lastDay:d.lastDay||null, todayCount:d.todayCount||0,
       helpToday:d.helpToday||0, helpDay:d.helpDay||null,
@@ -235,6 +276,7 @@ async function onSignedIn(user) {
     sync();
   }, e => console.warn('讀取格魯失敗：', e));
 
+  await recoverOutbox(uid);                    // 上次沒送出去的，現在補送
   await Promise.all([loadRoster(), loadVisits(), loadInbox()]);
   state.ready = true; sync();
   if (claimed) emit('claimed', claimed);
@@ -260,6 +302,17 @@ async function claimGuestProgress(uid) {
     try { localStorage.removeItem(GUEST_KEY); } catch {}
     return { taken: take, had: g.lifetime||0, capped: (g.lifetime||0) > take };
   } catch (e) { console.warn('補算訪客紀錄失敗：', e); return null; }
+}
+
+// 上次關頁沒送出去的點擊，開啟時補送
+async function recoverOutbox(uid) {
+  const o = outboxRead();
+  if (!o || o.uid !== uid || (!o.n && !o.fish && !o.gold)) return;
+  console.log(`POPGRU: 補送上次未寫入的 ${o.n} 下`);
+  flushTarget = o.target;
+  state.pending += o.n; pendFish += o.fish; pendGold += o.gold;
+  await flush();
+  emit('recovered', o);
 }
 
 export async function signIn()  { if (!fb) throw new Error('尚未設定 Firebase');
@@ -352,6 +405,7 @@ export function squash() {
     state.pending += 1;
     pendFish += r.gained;
     if (r.goldfish) pendGold += 1;
+    outboxAdd(me.uid, v.uid, 1, r.gained, r.goldfish ? 1 : 0);   // 先落地再說
     if (state.pending >= TUNING.maxPerFlush) flush();
   } else {
     state.global.squashes += 0;                      // 訪客不計入小圈子
@@ -400,6 +454,7 @@ export async function flush() {
       }, { merge:true });
     }
     await b.commit();
+    if (n || fish || gold) outboxSettle(me.uid, target, n, fish, gold);   // 確定寫進去了才扣
   } catch (e) {
     console.warn('寫入失敗，稍後重試：', e);
     state.pending += n; pendFish += fish; pendGold += gold;
@@ -459,13 +514,37 @@ export async function setNick(n) {
   } else { saveGuest(); }
 }
 
+export const ownsHat  = e => !!e && state.me.ownedHats.includes(e);
+export const hatLocked = e => hatInfo(e).need > state.global.squashes;
+
+// 解鎖一頂帽子。付一次錢，之後換戴免費。
+export async function buyHat(emoji) {
+  const info = hatInfo(emoji);
+  if (ownsHat(emoji))   throw new Error('已經解鎖過了');
+  if (hatLocked(emoji)) throw new Error(`要小圈子壓到 ${info.need.toLocaleString('en-US')} 下才解得開`);
+  if (state.me.fish < info.cost) throw new Error('魚不夠');
+
+  state.me.fish -= info.cost;
+  state.me.ownedHats = [...state.me.ownedHats, emoji];
+  sync();
+  if (state.mode === 'member' && fb) {
+    const { F } = fb;
+    F.setDoc(userRef(state.me.uid),
+      { fish: F.increment(-info.cost), ownedHats: F.arrayUnion(emoji) }, { merge:true })
+      .catch(e => console.warn('解鎖帽子失敗：', e));
+  } else { saveGuest(); }
+  await setHat(emoji);                       // 解鎖後直接戴上
+}
+
+// 換戴已解鎖的帽子（免費），或傳 null 脫掉
 export async function setHat(emoji) {
+  if (emoji && !ownsHat(emoji)) throw new Error('還沒解鎖這頂帽子');
   state.myGru.hat = emoji;
   if (state.viewing.isMine) state.viewing.hat = emoji;
   sync();
   if (state.mode === 'member' && fb) {
-    try { await fb.F.setDoc(gruRef(state.me.uid), { hat:emoji }, { merge:true }); }
-    catch (e) { console.warn('存帽子失敗：', e); }
+    fb.F.setDoc(gruRef(state.me.uid), { hat:emoji }, { merge:true })
+      .catch(e => console.warn('存帽子失敗：', e));
   } else { saveGuest(); }
 }
 
@@ -528,7 +607,6 @@ export async function buyForSelf(key, extra = {}) {
   me.fish -= item.cost;
   if (key === 'freeze') me.freezes += 1;
   if (key === 'double') me.double  += TUNING.doubleClicks;
-  if (key === 'hat')  { await setHat(extra.hat || '🎩'); }
   sync();
 
   if (state.mode === 'member' && fb) {
@@ -563,6 +641,7 @@ export async function collectInbox() {
     if (medals)  p.medals  = F.increment(medals);
     if (freezes) p.freezes = (me.freezes||0) + freezes;
     if (dbl)     p.double  = (me.double ||0) + dbl;
+    if (hat)     p.ownedHats = F.arrayUnion(hat);   // 送的帽子一併解鎖，之後能重複戴
     b.set(userRef(me.uid), p, { merge:true });
     if (hat) b.set(gruRef(me.uid), { hat }, { merge:true });
     for (const m of unread) b.update(F.doc(inboxCol(me.uid), m.id), { read:true });

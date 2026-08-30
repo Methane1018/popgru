@@ -1,11 +1,11 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=7';
+import * as S from './store.js?v=8';
 import {
-  TUNING, ITEMS, MILESTONES, HATS, SILLY_HATS,
+  TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION,
-} from './config.js?v=7';
+} from './config.js?v=8';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -340,13 +340,15 @@ function panelShop(body) {
     const row = el('div', 'row');
     row.append(el('div', 'row-av big', item.emoji));
     const mid = el('div', 'row-mid');
-    mid.append(el('div', 'row-title', `${item.name} · ${item.cost}${item.gold ? ' 🥇' : ' 🐟'}`));
+    mid.append(el('div', 'row-title', item.hat
+      ? `${item.name} · 40〜300 🐟`
+      : `${item.name} · ${item.cost}${item.gold ? ' 🥇' : ' 🐟'}`));
     mid.append(el('div', 'row-sub', item.desc));
     row.append(mid);
 
     const acts = el('div', 'row-acts');
     if (item.self) {
-      const b = el('button', 'btn small', '買給自己');
+      const b = el('button', 'btn small', item.hat ? '看帽子' : '買給自己');
       b.onclick = async () => {
         try {
           if (item.hat) return showHatPicker();
@@ -365,38 +367,77 @@ function panelShop(body) {
   }
 }
 
+// 帽子是解鎖制：買一次永久擁有，之後換戴免費。
+// 一頂帽子有三種狀態 —— 已解鎖 / 買得起 / 還沒到門檻，畫面要一眼分得出來。
 function showHatPicker() {
   subView = true;
   const body = $('sheetBody'); body.innerHTML = '';
-  $('sheetTitle').textContent = '選一頂帽子';
-  const unlocked = S.state.global.squashes;
-  const grid = el('div', 'grid');
-  const all = [...HATS.map((h, i) => ({ h, need: i < 4 ? 0 : (MILESTONES[i - 4]?.at || 0) })),
-               ...SILLY_HATS.map(h => ({ h, need: 0 }))];
-  let locked = 0;
-  for (const { h, need } of all) {
-    const cell = el('div', 'hat-cell');
-    const b = el('button', 'emoji-btn', h);
-    if (need > unlocked) {
-      locked++;
-      b.disabled = true; b.classList.add('locked');
-      cell.append(b, el('span', 'hat-need', nf(need)));      // 解鎖門檻直接寫出來
-    } else {
+  $('sheetTitle').textContent = '帽子';
+  const st = S.state, worn = st.myGru.hat;
+
+  const owned = HATS.filter(h => S.ownsHat(h.e));
+  const buyable = HATS.filter(h => !S.ownsHat(h.e) && !S.hatLocked(h.e));
+  const locked = HATS.filter(h => !S.ownsHat(h.e) && S.hatLocked(h.e));
+
+  const grid = (list, build) => {
+    const g = el('div', 'grid');
+    list.forEach(h => g.append(build(h)));
+    body.append(g);
+  };
+
+  // ── 已解鎖：直接換戴，不用錢 ──
+  body.append(el('p', 'note', `我的帽子${owned.length ? `（${owned.length} 頂）` : ''}`));
+  if (!owned.length) {
+    body.append(el('p', 'hint-sm', '還沒有任何帽子。買一頂之後就永久擁有，之後想換回來都不用再付錢。'));
+  } else {
+    body.append(el('p', 'hint-sm', '點一下就換戴，已經解鎖的帽子換來換去都免費。'));
+    grid(owned, h => {
+      const cell = el('div', 'hat-cell');
+      const b = el('button', 'emoji-btn' + (worn === h.e ? ' on' : ''), h.e);
+      b.title = h.name;
       b.onclick = async () => {
-        try { await S.buyForSelf('hat', { hat: h }); toast(`戴上 ${h}`); closePanel(); }
+        try { await S.setHat(h.e); toast(`戴上 ${h.e} ${h.name}`); closePanel(); }
         catch (e) { toast(e.message); }
       };
-      cell.append(b);
-    }
-    grid.append(cell);
+      cell.append(b, el('span', 'hat-need', worn === h.e ? '戴著' : '免費'));
+      return cell;
+    });
+    const off = el('button', 'btn', '不戴帽子');
+    off.onclick = async () => { await S.setHat(null); toast('脫掉了'); closePanel(); };
+    body.append(off);
   }
-  body.append(el('p', 'note', `一頂 ${ITEMS.hat.cost} 🐟。灰色的要等小圈子總數到達才會解鎖。`));
-  body.append(grid);
-  if (locked) body.append(el('p', 'hint-sm',
-    `還有 ${locked} 頂沒解鎖，數字是需要的小圈子總壓扁數。目前 ${nf(unlocked)} 下。`));
-  const off = el('button', 'btn', '不戴了');
-  off.onclick = async () => { await S.setHat(null); closePanel(); };
-  body.append(off);
+
+  // ── 買得起的 ──
+  if (buyable.length) {
+    body.append(el('p', 'note', '可以解鎖'));
+    body.append(el('p', 'hint-sm', `你有 🐟 ${nf(st.me.fish)}。解鎖一次，之後永久免費換戴。`));
+    grid(buyable, h => {
+      const cell = el('div', 'hat-cell');
+      const b = el('button', 'emoji-btn', h.e);
+      b.title = `${h.name} · ${h.cost} 魚`;
+      if (st.me.fish < h.cost) b.classList.add('poor');
+      b.onclick = async () => {
+        try { await S.buyHat(h.e); toast(`解鎖 ${h.e} ${h.name}，已經戴上`); closePanel(); }
+        catch (e) { toast(e.message); }
+      };
+      cell.append(b, el('span', 'hat-need', `${h.cost} 🐟`));
+      return cell;
+    });
+  }
+
+  // ── 還沒到門檻的 ──
+  if (locked.length) {
+    body.append(el('p', 'note', '還沒解鎖'));
+    body.append(el('p', 'hint-sm',
+      `數字是小圈子要壓到的總數，目前 ${nf(st.global.squashes)} 下。到了之後才買得到。`));
+    grid(locked, h => {
+      const cell = el('div', 'hat-cell');
+      const b = el('button', 'emoji-btn locked', h.e);
+      b.disabled = true; b.title = `${h.name} · ${nf(h.need)} 下解鎖`;
+      cell.append(b, el('span', 'hat-need', nf(h.need)));
+      return cell;
+    });
+  }
 }
 
 function showGivePicker(key, retried) {
@@ -408,12 +449,15 @@ function showGivePicker(key, retried) {
   let hat = '🎩', note = '';
   if (item.hat) {
     const grid = el('div', 'grid');
-    [...HATS.slice(0, 4), ...SILLY_HATS].forEach((h, i) => {
-      const b = el('button', 'emoji-btn' + (i === 0 ? ' on' : ''), h);
-      b.onclick = () => { hat = h; grid.querySelectorAll('.emoji-btn').forEach(x => x.classList.remove('on')); b.classList.add('on'); };
+    HATS.filter(h => h.need === 0).forEach((h, i) => {
+      const b = el('button', 'emoji-btn' + (i === 0 ? ' on' : ''), h.e);
+      b.title = h.name;
+      b.onclick = () => { hat = h.e;
+        grid.querySelectorAll('.emoji-btn').forEach(x => x.classList.remove('on')); b.classList.add('on'); };
       grid.append(b);
     });
-    body.append(el('p', 'note', '選一頂要扣在對方頭上的帽子'));
+    body.append(el('p', 'note', '選一頂扣在對方頭上'));
+    body.append(el('p', 'hint-sm', '對方會直接戴上，而且永久解鎖，之後想換回來不用付錢。'));
     body.append(grid);
   }
   if (item.text) {
