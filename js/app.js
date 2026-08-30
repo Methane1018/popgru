@@ -1,11 +1,13 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=3';
+import * as S from './store.js?v=5';
 import {
   TUNING, ITEMS, MILESTONES, HATS, SILLY_HATS,
-  ACCESS, DEFAULT_GRU_NAME,
-} from './config.js?v=3';
+  ACCESS, DEFAULT_GRU_NAME, APP_VERSION,
+} from './config.js?v=5';
+
+console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
 const $  = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag);
@@ -251,25 +253,28 @@ function render() {
   $('navInbox').disabled  = !social;
   $('shareBtn').hidden    = !social;
 
-  if (openPanel && panelLive) renderPanel(openPanel);
 }
 
 /* ------------------------------------------------------------------ 面板 -- */
-// panelLive = 這個面板可以被狀態更新自動重繪嗎。
-// 有輸入框或選到一半的畫面（送人、選帽子、改名）必須設成 false，
-// 否則任何一次 sync（你壓一下、Firestore 推快照、8 秒批次寫入）都會把它洗掉。
-let openPanel = null, panelLive = false;
+// 面板一旦畫出來就不再被狀態更新碰。
+// 之前讓它跟著 sync 自動重繪，結果是：朋友一壓，meta/global 的快照推過來就把面板
+// 清空，而 panelInbox 是 async 的，清空之後要等 await 才畫得回來 ——
+// 朋友越活躍，信箱就越畫不出來。現在只有「該面板自己的資料載完」才重畫。
+let openPanel = null, subView = false;
 
 function showPanel(name) {
   openPanel = name;
-  panelLive = (name !== 'me');
+  subView = false;
   document.body.classList.add('sheet-open');
   $('sheet').classList.add('open');
   $('scrim').classList.add('open');
   renderPanel(name);
 }
+function refreshPanel(name) {
+  if (openPanel === name && !subView) renderPanel(name);
+}
 function closePanel() {
-  openPanel = null; panelLive = false;
+  openPanel = null; subView = false;
   document.body.classList.remove('sheet-open');
   $('sheet').classList.remove('open');
   $('scrim').classList.remove('open');
@@ -358,7 +363,7 @@ function panelShop(body) {
 }
 
 function showHatPicker() {
-  panelLive = false;
+  subView = true;
   const body = $('sheetBody'); body.innerHTML = '';
   $('sheetTitle').textContent = '選一頂帽子';
   const unlocked = S.state.global.squashes;
@@ -392,7 +397,7 @@ function showHatPicker() {
 }
 
 function showGivePicker(key, retried) {
-  panelLive = false;
+  subView = true;
   const item = ITEMS[key], st = S.state;
   const body = $('sheetBody'); body.innerHTML = '';
   $('sheetTitle').textContent = `送 ${item.emoji} ${item.name} 給誰`;
@@ -454,11 +459,20 @@ function showGivePicker(key, retried) {
 }
 
 /* --- 信箱 --- */
-async function panelInbox(body) {
-  const st = S.state;
-  const got = await S.collectInbox();
-  if (got.length) toast(`收下了 ${got.length} 樣東西`);
+// 同步把目前信箱畫出來；「收下」在背景做，收完再重畫一次。
+// 千萬不要讓這個函式變成 async —— renderPanel 會先清空面板，
+// 一旦中間有 await，面板就會空白直到 await 結束。
+function panelInbox(body) {
+  drawInbox(body);
+  S.collectInbox().then(got => {
+    if (!got.length) return;
+    toast(`收下了 ${got.length} 樣東西`);
+    refreshPanel('inbox');
+  });
+}
 
+function drawInbox(body) {
+  const st = S.state;
   if (!st.inbox.length) { body.append(el('p', 'empty', '信箱是空的。去幫別人壓幾下，通常就會有回音。')); return; }
 
   for (const m of st.inbox) {
@@ -541,13 +555,13 @@ function panelMe(body) {
 }
 
 /* ------------------------------------------------------------------ 導覽 -- */
-$('navPeople').onclick = () => { S.loadRoster(); showPanel('people'); };
-$('navShop').onclick   = () => { S.loadRoster(); showPanel('shop'); };
-$('navInbox').onclick  = () => { S.loadInbox().then(() => showPanel('inbox')); };
+$('navPeople').onclick = () => { showPanel('people'); S.loadRoster().then(() => refreshPanel('people')); };
+$('navShop').onclick   = () => { showPanel('shop'); S.loadRoster(); };
+$('navInbox').onclick  = () => { showPanel('inbox'); S.loadInbox().then(() => refreshPanel('inbox')); };
 $('gruName').onclick   = () => {
   if (!S.state.viewing.isMine) return;          // 在別人家不能改人家的名字
-  if (S.state.mode === 'member') S.loadVisits();
-  showPanel('me');                               // 訪客也能取名，資料存在本機
+  showPanel('me');
+  if (S.state.mode === 'member') S.loadVisits().then(() => refreshPanel('me'));                               // 訪客也能取名，資料存在本機
 };
 $('navHome').onclick   = async () => {
   await S.goHome();

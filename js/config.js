@@ -20,6 +20,10 @@ export const firebaseConfig = {
   appId:             "1:87839344947:web:c83bf17822cf0d458e9646",
 };
 
+// 目前版本。載入時會印在主控台，用來確認朋友拿到的是不是新版。
+// 跑 ./bump.sh 會自動加一（同時更新所有 import 上的 ?v=）。
+export const APP_VERSION = 5;
+
 // Firebase SDK 版本。萬一載入失敗，改這個數字就好。
 export const FIREBASE_VERSION = '11.6.0';
 
