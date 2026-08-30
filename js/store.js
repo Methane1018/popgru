@@ -8,7 +8,7 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
-} from './config.js?v=0.6.0';
+} from './config.js?v=0.6.1';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -590,8 +590,16 @@ export async function flush() {
 }
 
 /* ----------------------------------------------------------- 名單 / 足跡 -- */
-export async function loadRoster() {
+// 這三個查詢每次都要讀好幾份文件（名單一次就是全員）。
+// 面板一開就重查的話，來回點幾次商店和信箱就燒掉幾百次讀取，
+// 所以加一層時間快取；真的需要最新資料時傳 force。
+const fetchedAt = { roster:0, visits:0, inbox:0 };
+const stale = k => Date.now() - fetchedAt[k] >= TUNING.listTtlMs;
+
+export async function loadRoster(force) {
   if (!fb) return;
+  if (!force && !stale('roster') && state.roster.length) return;
+  fetchedAt.roster = Date.now();
   try {
     const { F } = fb;
     const q = F.query(F.collection(fb.db,'grus'), F.orderBy('lastSquashedAt','desc'), F.limit(TUNING.rosterSize));
@@ -601,8 +609,10 @@ export async function loadRoster() {
   } catch (e) { console.warn('讀取名單失敗：', e); }
 }
 
-export async function loadVisits() {
+export async function loadVisits(force) {
   if (!fb || state.mode !== 'member') return;
+  if (!force && !stale('visits')) return;
+  fetchedAt.visits = Date.now();
   try {
     const { F } = fb;
     const q = F.query(F.collection(fb.db,'grus',state.me.uid,'visits'), F.orderBy('at','desc'), F.limit(20));
@@ -637,7 +647,10 @@ export async function setNick(n) {
     b.set(userRef(state.me.uid), { nick: nick, name: state.me.name }, { merge:true });
     b.set(gruRef(state.me.uid),  { ownerName: state.me.name }, { merge:true });
     // 不 await：Firestore 離線時會把寫入排隊，await 下去畫面就卡住了
-    b.commit().then(() => loadRoster()).catch(e => console.warn('改暱稱失敗：', e));
+    // 不重查名單：新名字我們自己就知道，直接改本機那一筆，省下整份查詢
+    b.commit().catch(e => console.warn('改暱稱失敗：', e));
+    const mine = state.roster.find(g => g.uid === state.me.uid);
+    if (mine) mine.ownerName = state.me.name;
   } else { saveGuest(); }
 }
 
@@ -714,8 +727,10 @@ export async function setHat(emoji) {
 }
 
 /* ----------------------------------------------------------------- 信箱 -- */
-export async function loadInbox() {
+export async function loadInbox(force) {
   if (!fb || state.mode !== 'member') return;
+  if (!force && !stale('inbox')) return;
+  fetchedAt.inbox = Date.now();
   try {
     const { F } = fb;
     const q = F.query(inboxCol(state.me.uid), F.orderBy('at','desc'), F.limit(40));

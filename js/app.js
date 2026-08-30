@@ -1,12 +1,12 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.6.0';
+import * as S from './store.js?v=0.6.1';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
-} from './config.js?v=0.6.0';
+} from './config.js?v=0.6.1';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -652,7 +652,7 @@ function showGivePicker(key, retried) {
   if (!list.length) {
     if (!retried) {                       // 名單可能還沒抓過，抓一次再畫
       body.append(el('p', 'empty', '載入名單中…'));
-      S.loadRoster().then(() => { if (openPanel === 'shop') showGivePicker(key, true); });
+      S.loadRoster(true).then(() => { if (openPanel === 'shop') showGivePicker(key, true); });
     } else {
       body.append(el('p', 'empty', '還沒有其他人可以送。等朋友登入之後就會出現。'));
     }
