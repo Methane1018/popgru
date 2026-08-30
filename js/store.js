@@ -36,7 +36,7 @@ const emit = (evt, d) => listeners[evt]?.forEach(fn => { try { fn(d); } catch (e
 
 /* ----------------------------------------------------------------- state -- */
 const blankMe = () => ({
-  uid:null, name:null, photo:null,
+  uid:null, name:null, googleName:null, nick:null, photo:null,
   lifetime:0, fish:0, goldfish:0, medals:0, freezes:0, double:0,
   streak:0, bestStreak:0, lastDay:null, todayCount:0, helpToday:0, helpDay:null,
 });
@@ -78,10 +78,10 @@ function loadGuest() {
 }
 function saveGuest() {
   if (state.mode !== 'guest') return;
-  const { lifetime, fish, goldfish, streak, bestStreak, lastDay, todayCount } = state.me;
+  const { lifetime, fish, goldfish, streak, bestStreak, lastDay, todayCount, nick } = state.me;
   try {
     localStorage.setItem(GUEST_KEY, JSON.stringify({
-      lifetime, fish, goldfish, streak, bestStreak, lastDay, todayCount,
+      lifetime, fish, goldfish, streak, bestStreak, lastDay, todayCount, nick,
       gruName: state.myGru.name, gruHat: state.myGru.hat, gruSquashes: state.myGru.squashes,
     }));
   } catch {}
@@ -92,6 +92,7 @@ function applyGuest() {
     lifetime:g.lifetime||0, fish:g.fish||0, goldfish:g.goldfish||0,
     streak:g.streak||0, bestStreak:g.bestStreak||0,
     lastDay:g.lastDay||null, todayCount:g.todayCount||0,
+    nick:g.nick||null, name:g.nick||null,
   });
   Object.assign(state.myGru, blankGru(), {
     name:g.gruName||DEFAULT_GRU_NAME, hat:g.gruHat||null, squashes:g.gruSquashes||0,
@@ -172,7 +173,7 @@ async function onSignedIn(user) {
   const guest = loadGuest();
   try {
     await F.setDoc(userRef(uid), {
-      name: state.me.name, photo: state.me.photo, lastSeen: F.serverTimestamp(),
+      googleName: gName, photo: state.me.photo, lastSeen: F.serverTimestamp(),
     }, { merge: true });
     const g = await F.getDoc(gruRef(uid));
     if (!g.exists()) {                                  // 第一次登入 → 開一隻格魯
@@ -200,7 +201,10 @@ async function onSignedIn(user) {
       streak:d.streak||0, bestStreak:d.bestStreak||0,
       lastDay:d.lastDay||null, todayCount:d.todayCount||0,
       helpToday:d.helpToday||0, helpDay:d.helpDay||null,
-      name:d.name||state.me.name, photo:d.photo||state.me.photo,
+      nick: d.nick || null,
+      googleName: d.googleName || state.me.googleName,
+      name: d.nick || d.googleName || state.me.googleName || '無名氏',
+      photo: d.photo || state.me.photo,
     });
     sync();
   }, e => console.warn('讀取個人資料失敗：', e));
@@ -420,6 +424,24 @@ export async function setGruName(name) {
   if (state.mode === 'member' && fb) {
     try { await fb.F.setDoc(gruRef(state.me.uid), { name:n }, { merge:true }); }
     catch (e) { console.warn('改名失敗：', e); }
+  } else { saveGuest(); }
+}
+
+// 暱稱。同時要更新格魯上的 ownerName，名單才看得到新名字。
+export async function setNick(n) {
+  const nick = String(n || '').trim().slice(0, 12);
+  state.me.nick = nick || null;
+  state.me.name = nick || state.me.googleName || '無名氏';
+  sync();
+  if (state.mode === 'member' && fb) {
+    try {
+      const { F } = fb;
+      const b = F.writeBatch(fb.db);
+      b.set(userRef(state.me.uid), { nick: nick || null, name: state.me.name }, { merge:true });
+      b.set(gruRef(state.me.uid),  { ownerName: state.me.name }, { merge:true });
+      await b.commit();
+      await loadRoster();
+    } catch (e) { console.warn('改暱稱失敗：', e); }
   } else { saveGuest(); }
 }
 

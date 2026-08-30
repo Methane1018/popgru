@@ -251,20 +251,26 @@ function render() {
   $('navInbox').disabled  = !social;
   $('shareBtn').hidden    = !social;
 
-  if (openPanel) renderPanel(openPanel);
+  if (openPanel && panelLive) renderPanel(openPanel);
 }
 
 /* ------------------------------------------------------------------ 面板 -- */
-let openPanel = null;
+// panelLive = 這個面板可以被狀態更新自動重繪嗎。
+// 有輸入框或選到一半的畫面（送人、選帽子、改名）必須設成 false，
+// 否則任何一次 sync（你壓一下、Firestore 推快照、8 秒批次寫入）都會把它洗掉。
+let openPanel = null, panelLive = false;
 
 function showPanel(name) {
   openPanel = name;
+  panelLive = (name !== 'me');
+  document.body.classList.add('sheet-open');
   $('sheet').classList.add('open');
   $('scrim').classList.add('open');
   renderPanel(name);
 }
 function closePanel() {
-  openPanel = null;
+  openPanel = null; panelLive = false;
+  document.body.classList.remove('sheet-open');
   $('sheet').classList.remove('open');
   $('scrim').classList.remove('open');
 }
@@ -317,7 +323,9 @@ function panelPeople(body) {
 /* --- 商店 --- */
 function panelShop(body) {
   const me = S.state.me;
-  body.append(el('p', 'note', `你有 🐟 ${nf(me.fish)}${me.goldfish ? ` · 🥇 ${me.goldfish}` : ''}`));
+  body.append(el('p', 'note', `你有 🐟 ${nf(me.fish)}${me.goldfish ? ` · 🥇 ${me.goldfish} 金魚` : ''}`));
+  body.append(el('p', 'hint-sm',
+    `🐟 魚壓一下得一條。🥇 金魚每 ${nf(TUNING.goldfishOdds)} 下才掉一次，只能用來買金牌送人。`));
 
   for (const [key, item] of Object.entries(ITEMS)) {
     if (key === 'poke') continue;
@@ -350,28 +358,41 @@ function panelShop(body) {
 }
 
 function showHatPicker() {
+  panelLive = false;
   const body = $('sheetBody'); body.innerHTML = '';
   $('sheetTitle').textContent = '選一頂帽子';
   const unlocked = S.state.global.squashes;
   const grid = el('div', 'grid');
   const all = [...HATS.map((h, i) => ({ h, need: i < 4 ? 0 : (MILESTONES[i - 4]?.at || 0) })),
                ...SILLY_HATS.map(h => ({ h, need: 0 }))];
+  let locked = 0;
   for (const { h, need } of all) {
+    const cell = el('div', 'hat-cell');
     const b = el('button', 'emoji-btn', h);
-    if (need > unlocked) { b.disabled = true; b.title = `${nf(need)} 下解鎖`; b.classList.add('locked'); }
-    else b.onclick = async () => {
-      try { await S.buyForSelf('hat', { hat: h }); toast(`戴上 ${h}`); closePanel(); }
-      catch (e) { toast(e.message); }
-    };
-    grid.append(b);
+    if (need > unlocked) {
+      locked++;
+      b.disabled = true; b.classList.add('locked');
+      cell.append(b, el('span', 'hat-need', nf(need)));      // 解鎖門檻直接寫出來
+    } else {
+      b.onclick = async () => {
+        try { await S.buyForSelf('hat', { hat: h }); toast(`戴上 ${h}`); closePanel(); }
+        catch (e) { toast(e.message); }
+      };
+      cell.append(b);
+    }
+    grid.append(cell);
   }
+  body.append(el('p', 'note', `一頂 ${ITEMS.hat.cost} 🐟。灰色的要等小圈子總數到達才會解鎖。`));
   body.append(grid);
+  if (locked) body.append(el('p', 'hint-sm',
+    `還有 ${locked} 頂沒解鎖，數字是需要的小圈子總壓扁數。目前 ${nf(unlocked)} 下。`));
   const off = el('button', 'btn', '不戴了');
   off.onclick = async () => { await S.setHat(null); closePanel(); };
   body.append(off);
 }
 
-function showGivePicker(key) {
+function showGivePicker(key, retried) {
+  panelLive = false;
   const item = ITEMS[key], st = S.state;
   const body = $('sheetBody'); body.innerHTML = '';
   $('sheetTitle').textContent = `送 ${item.emoji} ${item.name} 給誰`;
@@ -396,7 +417,15 @@ function showGivePicker(key) {
   }
 
   const list = st.roster.filter(g => g.uid !== st.me.uid);
-  if (!list.length) { body.append(el('p', 'empty', '還沒有其他人可以送。')); return; }
+  if (!list.length) {
+    if (!retried) {                       // 名單可能還沒抓過，抓一次再畫
+      body.append(el('p', 'empty', '載入名單中…'));
+      S.loadRoster().then(() => { if (openPanel === 'shop') showGivePicker(key, true); });
+    } else {
+      body.append(el('p', 'empty', '還沒有其他人可以送。等朋友登入之後就會出現。'));
+    }
+    return;
+  }
   for (const g of list) {
     const row = el('div', 'row');
     row.append(el('div', 'row-av', g.ownerPhoto ? '' : '🐧'));
@@ -417,7 +446,9 @@ function showGivePicker(key) {
         closePanel();
       } catch (e) { toast(e.message); b.disabled = false; }
     };
-    row.append(el('div', 'row-acts')).lastChild.append(b);
+    const acts = el('div', 'row-acts');
+    acts.append(b);
+    row.append(acts);
     body.append(row);
   }
 }
@@ -449,7 +480,9 @@ async function panelInbox(body) {
         try { await S.sendItem(m.from, 'poke'); toast(`戳回去了`); back.disabled = true; }
         catch (e) { toast(e.message); }
       };
-      row.append(el('div', 'row-acts')).lastChild.append(back);
+      const acts = el('div', 'row-acts');
+      acts.append(back);
+      row.append(acts);
     }
     body.append(row);
   }
@@ -458,14 +491,35 @@ async function panelInbox(body) {
 /* --- 我的格魯 --- */
 function panelMe(body) {
   const st = S.state;
-  const inp = el('input', 'input');
-  inp.value = st.myGru.name || DEFAULT_GRU_NAME;
-  inp.maxLength = 12;
-  inp.placeholder = '幫你的格魯取名';
-  body.append(el('p', 'note', '幫你的格魯取名'));
-  body.append(inp);
-  const save = el('button', 'btn primary', '改名');
-  save.onclick = async () => { await S.setGruName(inp.value); toast('改好了'); closePanel(); };
+
+  // 你自己的暱稱（別人在名單、信箱、「上一個壓的人」看到的名字）
+  body.append(el('p', 'note', '你的暱稱'));
+  const nickIn = el('input', 'input');
+  nickIn.value = st.me.nick || '';
+  nickIn.maxLength = 12;
+  nickIn.placeholder = st.me.googleName || '用 Google 帳號的名字';
+  body.append(nickIn);
+  body.append(el('p', 'hint-sm', st.mode === 'member'
+    ? '留空就用 Google 帳號的名字。大家在名單和信箱看到的就是這個。'
+    : '先取好放著，登入之後大家就會看到這個名字。'));
+
+  // 格魯的名字
+  body.append(el('p', 'note', '格魯的名字'));
+  const gruIn = el('input', 'input');
+  gruIn.value = st.myGru.name || DEFAULT_GRU_NAME;
+  gruIn.maxLength = 12;
+  gruIn.placeholder = DEFAULT_GRU_NAME;
+  body.append(gruIn);
+
+  const save = el('button', 'btn primary', '儲存');
+  save.onclick = async () => {
+    save.disabled = true;
+    try {
+      if ((st.me.nick || '') !== nickIn.value.trim()) await S.setNick(nickIn.value);
+      if ((st.myGru.name || '') !== gruIn.value.trim()) await S.setGruName(gruIn.value);
+      toast('存好了'); closePanel();
+    } catch (e) { toast('存不起來：' + e.message); save.disabled = false; }
+  };
   body.append(save);
 
   const hat = el('button', 'btn', '換帽子');
@@ -488,10 +542,13 @@ function panelMe(body) {
 
 /* ------------------------------------------------------------------ 導覽 -- */
 $('navPeople').onclick = () => { S.loadRoster(); showPanel('people'); };
-$('navShop').onclick   = () => showPanel('shop');
+$('navShop').onclick   = () => { S.loadRoster(); showPanel('shop'); };
 $('navInbox').onclick  = () => { S.loadInbox().then(() => showPanel('inbox')); };
-$('gruName').onclick   = () => { if (S.state.viewing.isMine && S.state.mode === 'member')
-                                 { S.loadVisits(); showPanel('me'); } };
+$('gruName').onclick   = () => {
+  if (!S.state.viewing.isMine) return;          // 在別人家不能改人家的名字
+  if (S.state.mode === 'member') S.loadVisits();
+  showPanel('me');                               // 訪客也能取名，資料存在本機
+};
 $('navHome').onclick   = async () => {
   await S.goHome();
   history.replaceState(null, '', location.pathname);
