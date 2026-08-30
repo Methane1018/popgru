@@ -1,12 +1,12 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.6.4';
+import * as S from './store.js?v=0.7.0';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
-} from './config.js?v=0.6.4';
+} from './config.js?v=0.7.0';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -314,6 +314,7 @@ function refreshPanel(name) {
   if (openPanel === name && !subView) renderPanel(name);
 }
 function closePanel() {
+  exitPreview(false);                 // 預覽罩也要收掉
   clearSkinPreview();                 // 沒按確認就離開＝不要那個預覽
   openPanel = null; subView = false;
   document.body.classList.remove('sheet-open');
@@ -352,6 +353,37 @@ function clearSkinPreview() {
   applySkin(S.state.viewing.skin);        // 還原成真正存起來的樣子
 }
 
+// 全畫面預覽：把商店收起來讓你真的看得到企鵝。
+// 期間整個畫面被罩住，點任何地方都是結束預覽。
+let previewing = false;
+
+function enterPreview() {
+  const { sel, cur } = skinPickerState();
+  const names = SKIN_KINDS.filter(({ k }) => sel[k] !== cur[k])
+                          .map(({ k }) => skinInfo(k, sel[k]).name).join('、');
+  previewing = true;
+  document.body.classList.remove('sheet-open');
+  $('sheet').classList.remove('open');
+  $('scrim').classList.remove('open');
+  $('previewWhat').textContent = names ? `預覽中：${names}` : '預覽中';
+  $('previewVeil').hidden = false;
+  applySkin({ ...cur, ...skinPreview });
+}
+
+function exitPreview(back = true) {
+  if (!previewing) return;
+  previewing = false;
+  $('previewVeil').hidden = true;
+  if (back && openPanel) {               // 回到剛才那個選單
+    document.body.classList.add('sheet-open');
+    $('sheet').classList.add('open');
+    $('scrim').classList.add('open');
+    showSkinPicker();
+  }
+}
+
+$('previewVeil').onclick = () => exitPreview();      // 點任何地方都結束
+
 function showSkinPicker() {
   subView = true;
   const body = $('sheetBody'); body.innerHTML = '';
@@ -360,8 +392,8 @@ function showSkinPicker() {
   const { cur, sel, toBuy, cost, changed } = skinPickerState();
 
   body.append(el('p', 'hint-sm',
-    `你有 🐟 ${nf(st.me.fish)}。點一下只是試看看，要按最下面的按鈕才會真的買或換。` +
-    `外觀掛在格魯身上，朋友來你家就會看到。`));
+    `你有 🐟 ${nf(st.me.fish)}。點一下只是選起來，按「👀 預覽」可以收起商店全畫面看效果，` +
+    `按「購買並使用」才會真的扣錢。外觀掛在格魯身上，朋友來你家就會看到。`));
 
   for (const { k, label } of SKIN_KINDS) {
     body.append(el('p', 'note', label));
@@ -414,6 +446,7 @@ function showSkinPicker() {
           for (const { k, id } of toBuy) await S.buySkin(k, id);       // 先解鎖
           for (const { k } of SKIN_KINDS) if (sel[k] !== cur[k]) await S.setSkin(k, sel[k]);
           skinPreview = null;
+          exitPreview(false);
           toast(`買下並換上「${names}」`);
           showSkinPicker();
         } catch (e) { toast(e.message); buy.disabled = false; }
@@ -426,12 +459,18 @@ function showSkinPicker() {
         try {
           for (const { k } of SKIN_KINDS) if (sel[k] !== cur[k]) await S.setSkin(k, sel[k]);
           skinPreview = null;
+          exitPreview(false);
           toast(`換成「${names}」`);
           showSkinPicker();
         } catch (e) { toast(e.message); }
       };
       bar.append(use);
     }
+    const look = el('button', 'btn', '👀 預覽');
+    look.title = '把商店收起來，全畫面看效果';
+    look.onclick = enterPreview;
+    bar.append(look);
+
     const undo = el('button', 'btn', '還原');
     undo.onclick = () => { clearSkinPreview(); showSkinPicker(); };
     bar.append(undo);

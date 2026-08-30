@@ -66,6 +66,11 @@ const check = (name, ok, detail = '') => {
         /const targetUid = v\.isMine \? \(state\.me\.uid \|\| v\.uid\) : v\.uid;/.test(store));
   check('待送匣記的是同一個對象', /outboxAdd\(me\.uid, flushTarget,/.test(store));
   check('待送匣不收空對象', /if \(!uid \|\| !target\) return;/.test(store));
+  // 預覽時商店必須收起來，否則面板會把企鵝整個遮住，等於看不到預覽
+  check('預覽會收起商店面板', /\$\('sheet'\)\.classList\.remove\('open'\);[\s\S]{0,200}previewVeil/.test(app));
+  check('預覽罩點任何地方都能結束', /\$\('previewVeil'\)\.onclick = \(\) => exitPreview\(\)/.test(app));
+  check('關閉面板會收掉預覽罩',
+        /function closePanel\(\) \{[\s\S]{0,200}?exitPreview\(false\)/.test(app));
   check('補送會把 null 對象算回自己', /t === 'null' \|\| t === 'undefined'/.test(store));
 }
 

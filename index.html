@@ -91,7 +91,11 @@
   body[data-bg="night"] {--skin-wash:linear-gradient(rgba(16,26,56,.34),rgba(16,26,56,.34))}
 
   body[data-font="mono"]    .count{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:-.01em}
-  body[data-font="shadow"]  .count{text-shadow:3px 3px 0 var(--line), 6px 6px 0 var(--bg-2)}
+  /* 原本用 --line / --bg-2 當陰影色，那兩個跟背景幾乎同色，等於看不見。
+     改成用強調色做多層擠出，亮暗兩種模式都看得出來。 */
+  body[data-font="shadow"]  .count{
+    text-shadow:1px 1px 0 var(--accent), 2px 2px 0 var(--accent), 3px 3px 0 var(--accent),
+                4px 4px 0 var(--accent), 5px 5px 0 var(--accent), 7px 8px 12px var(--shadow)}
   body[data-font="glow"]    .count{color:var(--accent); text-shadow:0 0 18px var(--accent), 0 0 44px var(--accent)}
   body[data-font="gold"]    .count{background:linear-gradient(180deg,#ffe9a3,#d4a017 55%,#8a6207);
                                    -webkit-background-clip:text; background-clip:text; color:transparent;
@@ -207,6 +211,18 @@
 
   /* 提示固定在標題列正下方。放在畫面底部會蓋住商店／信箱那排按鈕，
      放在這裡最多只擋到一行說明文字，而且面板打開時也不會擋到內容。 */
+  /* 預覽罩：透明但吃掉所有點擊，所以預覽時按不到企鵝也按不到下面那排 */
+  .preview-veil{position:fixed; inset:0; z-index:25; display:flex;
+                align-items:flex-end; justify-content:center;
+                padding-bottom:calc(20px + env(safe-area-inset-bottom)); cursor:pointer}
+  .preview-bar{display:flex; align-items:center; gap:10px; max-width:92vw;
+               background:var(--ink); color:var(--bg); border-radius:999px;
+               padding:9px 10px 9px 16px; font-size:13px; font-weight:700;
+               box-shadow:0 8px 28px rgba(0,0,0,.32)}
+  .preview-bar button{appearance:none; border:0; border-radius:999px; padding:7px 13px;
+                      font:inherit; font-size:12px; font-weight:800; cursor:pointer;
+                      background:var(--bg); color:var(--ink); white-space:nowrap}
+
   .toast{position:fixed; left:50%; top:calc(46px + env(safe-area-inset-top));
          transform:translate(-50%,-14px); z-index:30; max-width:min(440px,92vw);
          background:var(--ink); color:var(--bg); font-size:13px; font-weight:700;
@@ -291,8 +307,17 @@
   <div class="sheet-body" id="sheetBody"></div>
 </aside>
 
+<!-- 預覽外觀時蓋住全畫面：擋掉所有操作，只留「結束預覽」。
+     不然商店面板會把企鵝整個遮住，根本看不到自己在預覽什麼。 -->
+<div class="preview-veil" id="previewVeil" hidden>
+  <div class="preview-bar">
+    <span id="previewWhat">預覽中</span>
+    <button id="previewExit" type="button">結束預覽</button>
+  </div>
+</div>
+
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=0.6.4"></script>
+<script type="module" src="js/app.js?v=0.7.0"></script>
 </body>
 </html>
