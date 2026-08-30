@@ -46,6 +46,12 @@ const check = (name, ok, detail = '') => {
           `只寫不鏡像=${onlyW} 只鏡像不寫=${onlyM}`);
   }
   check('每次 sync 都會存鏡像', /const sync = \(\) => \{ mirrorSave\(\);/.test(store));
+  // 送出中的量要記著，否則期間來的快照會用舊的伺服器數字把畫面往回拉
+  check('flush 會記錄 inflight', /inflight = \{ n, fish, gold \};/.test(store));
+  check('flush 結束會清掉 inflight', /inflight = \{ n:0, fish:0, gold:0 \};[\s\S]{0,120}scheduleFlush/.test(store));
+  check('快照會加回未寫出的量',
+        /lifetime: \(d\.lifetime\|\|0\) \+ state\.pending \+ inflight\.n/.test(store));
+  check('載入時會先用本機備份墊畫面', /if \(prefillFromMirror\(\)\)/.test(store));
   // Firestore 第一份快照可能來自空的本機快取。把它當真就會把資料讀成 0
   // 再寫回伺服器，真資料就沒了 —— 這是連勝歸零的真正原因。
   check('個人資料忽略第一份快取快照',

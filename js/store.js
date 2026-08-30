@@ -8,7 +8,7 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
-} from './config.js?v=0.6.1';
+} from './config.js?v=0.6.2';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -170,16 +170,31 @@ function outboxSettle(uid, target, n, fish, gold) {
 // 只要有任何一次沒寫成功，重整就會被伺服器上的舊值蓋回去。
 // 所以每次變動都在本機留一份，載入時比日期挑比較新的那份。
 // 這樣就算伺服器那邊完全沒寫進去，重整也不會掉。
+// 前段是「絕對值」欄位（只有這台裝置在寫，遺失就回不來）；
+// 後段是顯示用的數字，載入時先拿來墊著，免得畫面閃一下 0 再跳回真值。
 const MIRROR_FIELDS = ['streak','bestStreak','lastDay','todayCount','helpToday','helpDay','freezes','double'];
+const MIRROR_DISPLAY = ['lifetime','fish','goldfish','medals'];
+const MIRROR_ALL = [...MIRROR_FIELDS, ...MIRROR_DISPLAY];
 
 function mirrorSave() {
   if (state.mode !== 'member' || !state.me.uid || !state.me.loaded) return;
   try {
     const o = { uid: state.me.uid, at: Date.now() };
-    for (const f of MIRROR_FIELDS) o[f] = state.me[f];
+    for (const f of MIRROR_ALL) o[f] = state.me[f];
     localStorage.setItem(MIRROR_KEY, JSON.stringify(o));
   } catch {}
 }
+// 載入時先用上次的本機備份把畫面墊起來。
+// 不然從開頁到伺服器回覆的那一兩秒，所有數字都是 0，看起來像東西不見了。
+// 這只是墊著：不設 loaded，所以不會被當成確認過的資料寫回伺服器。
+function prefillFromMirror() {
+  let o = null;
+  try { o = JSON.parse(localStorage.getItem(MIRROR_KEY) || 'null'); } catch {}
+  if (!o || !o.uid) return false;
+  for (const f of MIRROR_ALL) if (o[f] !== undefined) state.me[f] = o[f];
+  return true;
+}
+
 function mirrorRead(uid) {
   try {
     const o = JSON.parse(localStorage.getItem(MIRROR_KEY) || 'null');
@@ -199,6 +214,7 @@ const inboxCol  = uid => fb.F.collection(fb.db, 'users', uid, 'inbox');
 export async function init() {
   applyGuest();
   if (!configured) { state.ready = true; sync(); return; }
+  if (prefillFromMirror()) emit('state', state);   // 先把畫面填起來，別閃 0
 
   try {
     const [appM, authM, fsM] = await Promise.all([
@@ -301,8 +317,14 @@ async function onSignedIn(user) {
 
     // 這幾個欄位是用 increment() 寫的，或會被別人改動（收到魚、金牌、帽子），
     // 伺服器永遠比本機正確，所以每次快照都照抄。
+    // 伺服器的數字 ＋ 還沒寫出去的量。直接照抄伺服器的話，
+    // 任何一次非 flush 的寫入（買帽子、買外觀、改暱稱、收信箱）都會
+    // 推來一份「還沒算進你剛才那些點擊」的快照，畫面就往回跳。
     Object.assign(state.me, {
-      lifetime:d.lifetime||0, fish:d.fish||0, goldfish:d.goldfish||0, medals:d.medals||0,
+      lifetime: (d.lifetime||0) + state.pending + inflight.n,
+      fish:     (d.fish    ||0) + pendFish      + inflight.fish,
+      goldfish: (d.goldfish||0) + pendGold      + inflight.gold,
+      medals:   d.medals||0,
       // 舊制買過的帽子（只存在 grus.hat）視同已解鎖，不能讓人白花錢
       ownedHats: Array.from(new Set([
         ...(Array.isArray(d.ownedHats) ? d.ownedHats : []),
@@ -522,6 +544,10 @@ export function squash() {
 
 /* ------------------------------------------------------------ 批次寫入 -- */
 let pendFish = 0, pendGold = 0, pendPatch = null, flushing = false, flushTimer = null;
+// 正在送出、但伺服器還沒確認的量。
+// 少了這個，送出期間來的快照會用「還沒加上這批」的伺服器數字覆蓋畫面，
+// 看起來就像數字自己往回跳。
+let inflight = { n:0, fish:0, gold:0 };
 
 // 停手之後很快就寫出去。原本只靠 8 秒的定時批次，壓兩下馬上關掉就來不及。
 // 連續狂點時 timer 會一直被重設，所以一整串點擊仍然只算一次寫入。
@@ -546,6 +572,7 @@ export async function flush() {
   if (!n && !fish && !gold && !patch) return;
 
   flushing = true;
+  inflight = { n, fish, gold };                 // 送出期間先記著，快照才不會把畫面往回拉
   state.pending = 0; pendFish = 0; pendGold = 0; pendPatch = null; flushTarget = null;
   const { F, db } = fb, me = state.me;
   try {
@@ -585,6 +612,7 @@ export async function flush() {
     flushTarget = target; if (patch) queuePatch(patch);
   } finally {
     flushing = false;
+    inflight = { n:0, fish:0, gold:0 };
     if (state.pending || pendFish || pendGold) scheduleFlush();   // 期間又累積了就再送
   }
 }
