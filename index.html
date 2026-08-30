@@ -38,7 +38,30 @@
 
   /* ---------- 身分列 ---------- */
   .top{width:min(540px,100%); display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:34px}
-  .brand{font-size:11px; font-weight:800; letter-spacing:.32em; color:var(--muted); padding-left:.32em}
+  .brand{appearance:none; border:0; background:none; font-family:inherit;
+         font-size:11px; font-weight:800; letter-spacing:.32em; color:var(--muted);
+         padding:4px 6px 4px .32em; cursor:pointer; border-radius:8px;
+         display:inline-flex; align-items:center; gap:6px}
+  .brand:hover{color:var(--ink)}
+  .brand:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .ver{font-size:10px; font-weight:700; letter-spacing:.04em; opacity:.75;
+       font-variant-numeric:tabular-nums}
+  /* 有沒看過的新版本時，版本號旁邊點一個小點 */
+  .brand.fresh .ver{color:var(--accent); opacity:1}
+  .brand.fresh .ver::after{content:''; display:inline-block; width:5px; height:5px;
+         margin-left:4px; border-radius:50%; background:var(--accent); vertical-align:middle}
+
+  /* 更新紀錄 */
+  .rel{padding:12px 2px; border-bottom:1px solid var(--line)}
+  .rel:last-child{border-bottom:0}
+  .rel-head{display:flex; align-items:baseline; gap:8px; margin-bottom:6px}
+  .rel-v{font-size:15px; font-weight:800; font-variant-numeric:tabular-nums}
+  .rel-v.now{color:var(--accent)}
+  .rel-date{font-size:11.5px; color:var(--muted); font-weight:600}
+  .rel-tag{font-size:10px; font-weight:800; letter-spacing:.06em; color:var(--accent-ink);
+           background:var(--accent); border-radius:99px; padding:2px 7px}
+  .rel ul{margin:0; padding-left:18px}
+  .rel li{font-size:14px; margin:4px 0; line-height:1.6}
   .who{display:flex; align-items:center; gap:7px; font-size:13px; font-weight:600}
   .who-name{color:var(--ink); max-width:9em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .who-hint{color:var(--muted); font-weight:600}
@@ -169,7 +192,9 @@
 <div class="loading" id="loading">載入格魯中…</div>
 
 <header class="top">
-  <div class="brand">POPGRU</div>
+  <button class="brand" id="brand" type="button" title="看更新了什麼">
+    POPGRU <span class="ver" id="ver"></span>
+  </button>
   <div class="who" id="who"></div>
 </header>
 
@@ -228,6 +253,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=11"></script>
+<script type="module" src="js/app.js?v=0.4.0"></script>
 </body>
 </html>

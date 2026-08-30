@@ -59,14 +59,29 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
 
 // 5) 版本標記四處要一致，否則同一個模組會被載入兩份、各有各的 state
 {
+  const V = /\.js\?v=([0-9A-Za-z.\-]+)/g;
   const vs = [
-    ...[...html.matchAll(/\.js\?v=(\d+)/g)].map(m => m[1]),
-    ...[...app.matchAll(/\.js\?v=(\d+)/g)].map(m => m[1]),
-    ...[...store.matchAll(/\.js\?v=(\d+)/g)].map(m => m[1]),
+    ...[...html.matchAll(V)].map(m => m[1]),
+    ...[...app.matchAll(V)].map(m => m[1]),
+    ...[...store.matchAll(V)].map(m => m[1]),
   ];
-  const appv = (cfg.match(/APP_VERSION = (\d+)/) || [])[1];
+  const top = (cfg.match(/CHANGELOG = \[\s*\{\s*v:\s*'([^']+)'/) || [])[1];
   check('所有 import 的 ?v= 一致', new Set(vs).size === 1, vs.join(','));
-  check('APP_VERSION 與 ?v= 相同', vs[0] === appv, `?v=${vs[0]} APP_VERSION=${appv}`);
+  check('?v= 等於更新紀錄最上面那筆', vs[0] === top, `?v=${vs[0]} 更新紀錄=${top}`);
+  check('APP_VERSION 取自更新紀錄', /APP_VERSION = CHANGELOG\[0\]\.v/.test(cfg));
+}
+
+// 7) 更新紀錄本身要合法：版本遞減、格式正確、每筆都有寫內容
+{
+  const entries = [...cfg.matchAll(/\{\s*v:'([^']+)',\s*date:'([^']+)',\s*notes:\[(.*?)\]\s*\}/gs)];
+  check('更新紀錄至少一筆', entries.length > 0, String(entries.length));
+  const semver = entries.every(e => /^\d+\.\d+\.\d+$/.test(e[1]));
+  check('版本號格式都是 x.y.z', semver, entries.map(e => e[1]).join(','));
+  const key = v => v.split('.').map(Number).reduce((a, n) => a * 1000 + n, 0);
+  const ordered = entries.every((e, i) => i === 0 || key(entries[i - 1][1]) > key(e[1]));
+  check('更新紀錄由新到舊排序', ordered, entries.map(e => e[1]).join(' > '));
+  const allHaveNotes = entries.every(e => e[3].trim().length > 0);
+  check('每個版本都有寫更新內容', allHaveNotes);
 }
 
 // 6) 帽子的解鎖門檻要對得上里程碑，不然進度條寫的解鎖品項是騙人的

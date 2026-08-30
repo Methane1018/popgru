@@ -1,13 +1,21 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=11';
+import * as S from './store.js?v=0.4.0';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
-  ACCESS, DEFAULT_GRU_NAME, APP_VERSION,
-} from './config.js?v=11';
+  ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
+} from './config.js?v=0.4.0';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
+
+// 記住朋友看過哪一版的更新內容，沒看過就在版本號旁邊點一個小點
+const SEEN_VER = 'popgru.seenVersion';
+const seenVersion = () => { try { return localStorage.getItem(SEEN_VER); } catch { return null; } };
+function markVersionSeen() {
+  try { localStorage.setItem(SEEN_VER, APP_VERSION); } catch {}
+  document.getElementById('brand')?.classList.remove('fresh');
+}
 
 const $  = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag);
@@ -296,8 +304,27 @@ $('sheetClose').onclick = closePanel;
 
 function renderPanel(name) {
   const body = $('sheetBody'); body.innerHTML = '';
-  $('sheetTitle').textContent = { people:'大家的格魯', shop:'商店', inbox:'信箱', me:'我的格魯' }[name] || '';
-  ({ people: panelPeople, shop: panelShop, inbox: panelInbox, me: panelMe })[name]?.(body);
+  $('sheetTitle').textContent =
+    { people:'大家的格魯', shop:'商店', inbox:'信箱', me:'我的格魯', changelog:'更新內容' }[name] || '';
+  ({ people: panelPeople, shop: panelShop, inbox: panelInbox,
+     me: panelMe, changelog: panelChangelog })[name]?.(body);
+}
+
+/* --- 更新內容 --- */
+function panelChangelog(body) {
+  markVersionSeen();
+  for (const rel of CHANGELOG) {
+    const box = el('div', 'rel');
+    const head = el('div', 'rel-head');
+    head.append(el('span', 'rel-v' + (rel.v === APP_VERSION ? ' now' : ''), `v${rel.v}`));
+    head.append(el('span', 'rel-date', rel.date));
+    if (rel.v === APP_VERSION) head.append(el('span', 'rel-tag', '目前版本'));
+    box.append(head);
+    const ul = el('ul');
+    rel.notes.forEach(n => ul.append(el('li', null, n)));
+    box.append(ul);
+    body.append(box);
+  }
 }
 
 /* --- 大家 --- */
@@ -631,6 +658,7 @@ function panelMe(body) {
 }
 
 /* ------------------------------------------------------------------ 導覽 -- */
+$('brand').onclick     = () => showPanel('changelog');
 $('navPeople').onclick = () => { showPanel('people'); S.loadRoster().then(() => refreshPanel('people')); };
 $('navShop').onclick   = () => { showPanel('shop'); S.loadRoster(); };
 $('navInbox').onclick  = () => {
@@ -675,9 +703,18 @@ const ready = img => img.complete && img.naturalWidth
   ? Promise.resolve() : new Promise(r => { img.onload = img.onerror = r; });
 
 (async () => {
+  $('ver').textContent = `v${APP_VERSION}`;
+  const prevVer = seenVersion();
+  if (prevVer !== APP_VERSION) $('brand').classList.add('fresh');
+
   await Promise.all([ready(imgTall), ready(imgFlat)]);
   $('loading').hidden = true;
   await S.init();
+
+  // 只在「用過舊版之後升上來」時提醒；第一次玩的人不用被打擾
+  if (prevVer && prevVer !== APP_VERSION)
+    setTimeout(() => toast(`更新到 v${APP_VERSION}，點左上角看改了什麼`), 900);
+  else if (!prevVer) markVersionSeen();
 
   const target = new URLSearchParams(location.search).get('gru');
   if (target && S.configured) {
