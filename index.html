@@ -214,6 +214,9 @@
          opacity:0; pointer-events:none; transition:opacity .18s, transform .18s}
   .toast.show{opacity:1; transform:translate(-50%,0)}
 
+  .writefail{width:min(540px,100%); margin-top:8px; padding:9px 13px; border-radius:10px;
+             background:#8a2b2b; color:#fff; font-size:12.5px; font-weight:700; line-height:1.5;
+             text-align:center}
   .hint-sm{font-size:12.5px; color:var(--muted); line-height:1.55; margin:2px 4px 10px}
   .hat-cell{display:flex; flex-direction:column; align-items:center; gap:3px}
   .hat-need{font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; opacity:.75}
@@ -232,6 +235,8 @@
   </button>
   <div class="who" id="who"></div>
 </header>
+
+<div class="writefail" id="writefail" hidden></div>
 
 <main class="wrap">
   <div class="count-label" id="countLabel">你總共壓了</div>
@@ -288,6 +293,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=0.6.2"></script>
+<script type="module" src="js/app.js?v=0.6.3"></script>
 </body>
 </html>

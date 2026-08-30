@@ -1,12 +1,12 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.6.2';
+import * as S from './store.js?v=0.6.3';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
-} from './config.js?v=0.6.2';
+} from './config.js?v=0.6.3';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -842,6 +842,12 @@ $('sound').textContent = soundOn ? '🔊' : '🔇';
 S.on('state', render);
 S.on('toast', toast);
 S.on('live', ls => toast(`👀 ${ls.name} 剛剛也在壓`));
+// 連續存檔失敗要讓人看得到，不然會像這幾天一樣：畫面正常，資料一個字都沒進去
+S.on('writefail', e => {
+  const bar = $('writefail');
+  bar.textContent = `⚠️ 存檔失敗（${e.code || '未知錯誤'}）· 你壓的還在這台裝置上，但沒有存進伺服器`;
+  bar.hidden = false;
+});
 S.on('claimed', c => {
   if (!c.taken) return;
   toast(c.capped ? `把 ${nf(c.taken)} 下算進小圈子了（訪客上限）` : `把你的 ${nf(c.taken)} 下算進小圈子了`);

@@ -8,7 +8,7 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
-} from './config.js?v=0.6.2';
+} from './config.js?v=0.6.3';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -548,6 +548,7 @@ let pendFish = 0, pendGold = 0, pendPatch = null, flushing = false, flushTimer =
 // 少了這個，送出期間來的快照會用「還沒加上這批」的伺服器數字覆蓋畫面，
 // 看起來就像數字自己往回跳。
 let inflight = { n:0, fish:0, gold:0 };
+let failCount = 0, blockedLogged = false;
 
 // 停手之後很快就寫出去。原本只靠 8 秒的定時批次，壓兩下馬上關掉就來不及。
 // 連續狂點時 timer 會一直被重設，所以一整串點擊仍然只算一次寫入。
@@ -563,7 +564,14 @@ export async function flush() {
   // 之前是「照寫，但跳過絕對值欄位」，那留下一個窗口：只要有一次 flush 落在
   // 這個窗口裡，連續天數／凍結卡／幫忙額度就整批不會被寫出去。
   // 乾脆等資料到齊再寫 —— 點擊本來就有待送匣墊著，不會掉。
-  if (!state.me.loaded) { scheduleFlush(); return; }
+  if (!state.me.loaded) {
+    if (!blockedLogged) {                 // 只印一次，但一定要印
+      blockedLogged = true;
+      console.warn('POPGRU 寫入暫緩：個人資料還沒讀到（等伺服器的第一份快照）');
+    }
+    scheduleFlush(); return;
+  }
+  blockedLogged = false;
   // 前一次還在送就晚點再試。少了這個重排，送出期間累積的點擊
   // 要等 8 秒的保底定時器才會被撿走，剛好卡在「壓完馬上關掉」的空隙。
   if (flushing) { scheduleFlush(); return; }
@@ -604,10 +612,18 @@ export async function flush() {
     }
     await b.commit();
     if (n || fish || gold) outboxSettle(me.uid, target, n, fish, gold);   // 確定寫進去了才扣
+    failCount = 0;
     console.log(`POPGRU 已寫入 +${n} 下 · 連勝=${me.streak} 幫忙=${me.helpToday} ` +
                 `凍結卡=${me.freezes} 雙倍=${me.double}`);
   } catch (e) {
-    console.warn('寫入失敗，稍後重試：', e);
+    // 寫入失敗必須看得見。之前只是 console.warn，結果整整一個多小時
+    // 沒有任何資料寫進去，畫面上卻完全沒有徵兆。
+    failCount++;
+    console.error(
+      `POPGRU 寫入失敗 #${failCount}｜code=${e && e.code}｜${e && e.message}
+` +
+      `  這批：+${n} 下 給 ${target}｜等在待送匣的不會掉，但伺服器沒收到`);
+    if (failCount === 3) emit('writefail', { code: e && e.code, message: e && e.message });
     state.pending += n; pendFish += fish; pendGold += gold;
     flushTarget = target; if (patch) queuePatch(patch);
   } finally {

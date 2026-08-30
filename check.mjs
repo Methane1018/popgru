@@ -31,7 +31,9 @@ const check = (name, ok, detail = '') => {
   const n = (store.match(/state\.me\.loaded = true/g) || []).length;
   check('me.loaded 恰好被設 true 一次', n === 1, `${n} 次`);
   // 這一條是關鍵：個人資料沒讀到就絕對不能寫，否則會把初始值 0 覆寫上去
-  check('flush 會等個人資料載入', /if \(!state\.me\.loaded\) \{ scheduleFlush\(\); return; \}/.test(store));
+  check('flush 會等個人資料載入', /if \(!state\.me\.loaded\) \{[\s\S]{0,320}?scheduleFlush\(\); return;/.test(store));
+  check('寫入失敗會大聲報錯', /console\.error\(\s*`POPGRU 寫入失敗/.test(store));
+  check('寫入失敗會通知畫面', /emit\('writefail'/.test(store));
   check('載入完會主動放行一次 flush', /state\.me\.loaded = true[\s\S]{0,1400}?\n      flush\(\);/.test(store));
   // 鏡像涵蓋的欄位必須跟 flush 寫回的完全一樣，否則會有欄位無人保護
   const mf = store.match(/const MIRROR_FIELDS = \[(.*?)\];/s);
