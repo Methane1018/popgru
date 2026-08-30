@@ -46,6 +46,12 @@ const check = (name, ok, detail = '') => {
           `只寫不鏡像=${onlyW} 只鏡像不寫=${onlyM}`);
   }
   check('每次 sync 都會存鏡像', /const sync = \(\) => \{ mirrorSave\(\);/.test(store));
+  // Firestore 第一份快照可能來自空的本機快取。把它當真就會把資料讀成 0
+  // 再寫回伺服器，真資料就沒了 —— 這是連勝歸零的真正原因。
+  check('個人資料忽略第一份快取快照',
+        /if \(!state\.me\.loaded && s\.metadata\.fromCache\) return;/.test(store));
+  check('格魯也忽略第一份快取快照',
+        /if \(!gruLoaded && s\.metadata\.fromCache\) return;/.test(store));
 }
 
 // 2) 待送匣讀寫格式要對得上（曾經一邊寫舊格式、一邊讀新格式，補送整個失效）

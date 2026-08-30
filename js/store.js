@@ -8,7 +8,7 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
-} from './config.js?v=0.5.2';
+} from './config.js?v=0.6.0';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -289,6 +289,13 @@ async function onSignedIn(user) {
 
   unsubUser?.();
   unsubUser = F.onSnapshot(userRef(uid), s => {
+    // Firestore 會先給一份「本機快取」的快照，再給伺服器那份。
+    // 頁面剛載入時快取是空的，所以第一份是一份不存在的空文件。
+    // 把它當成真的資料，就會把連勝／凍結卡／雙倍魚全部讀成 0，
+    // 然後 flush() 再把這些 0 寫回去，真資料就沒了。
+    // 所以第一份一定要等伺服器的。
+    if (!state.me.loaded && s.metadata.fromCache) return;
+
     const d = s.data() || {};
     const first = !state.me.loaded;
 
@@ -331,7 +338,8 @@ async function onSignedIn(user) {
 
       const m = state.me;
       console.log(
-        `POPGRU 個人資料｜採用=${useMirror ? '本機鏡像' : '伺服器'}\n` +
+        `POPGRU 個人資料｜採用=${useMirror ? '本機鏡像' : '伺服器'}` +
+        `（來源=${s.metadata.fromCache ? '快取' : '伺服器'}, 文件${s.exists() ? '存在' : '不存在'}）\n` +
         `  伺服器：連勝=${srv.streak} 最後一天=${srv.lastDay} 凍結卡=${srv.freezes} ` +
         `雙倍=${srv.double} 幫忙=${srv.helpToday}/${srv.helpDay}\n` +
         `  本機　：${mir ? `連勝=${mir.streak} 最後一天=${mir.lastDay} 凍結卡=${mir.freezes} `
@@ -345,7 +353,10 @@ async function onSignedIn(user) {
   }, e => console.warn('讀取個人資料失敗：', e));
 
   unsubGru?.();
+  let gruLoaded = false;
   unsubGru = F.onSnapshot(gruRef(uid), s => {
+    if (!gruLoaded && s.metadata.fromCache) return;    // 同理，別把空快取當成你的格魯
+    gruLoaded = true;
     const d = s.data() || {};
     state.myGru = {
       uid, name:d.name||DEFAULT_GRU_NAME, ownerName:d.ownerName||state.me.name,
