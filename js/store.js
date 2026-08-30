@@ -8,7 +8,7 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
-} from './config.js?v=0.6.3';
+} from './config.js?v=0.6.4';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -148,6 +148,7 @@ function outboxWrite(o) {
 // 每個對象各記一筆。之前只記一個對象，一從自己家換去朋友家，
 // 自己家還沒送出去的那些就被整筆蓋掉了。
 function outboxAdd(uid, target, n, fish, gold) {
+  if (!uid || !target) return;          // 對象不明就不要記，免得又寫出一筆 "null"
   const o = outboxRead() || { uid, items:{} };
   if (o.uid !== uid) { o.uid = uid; o.items = {}; }      // 換帳號就重來
   const it = o.items[target] || { n:0, fish:0, gold:0 };
@@ -305,12 +306,12 @@ async function onSignedIn(user) {
 
   unsubUser?.();
   unsubUser = F.onSnapshot(userRef(uid), s => {
-    // Firestore 會先給一份「本機快取」的快照，再給伺服器那份。
-    // 頁面剛載入時快取是空的，所以第一份是一份不存在的空文件。
-    // 把它當成真的資料，就會把連勝／凍結卡／雙倍魚全部讀成 0，
-    // 然後 flush() 再把這些 0 寫回去，真資料就沒了。
-    // 所以第一份一定要等伺服器的。
-    if (!state.me.loaded && s.metadata.fromCache) return;
+    // 只忽略「空的快取快照」。
+    // 危險的只有『文件不存在 + 來自快取』這一種：那代表我們還不知道伺服器上有什麼，
+    // 把它當真就會把資料讀成 0 再寫回去。快取裡「有資料」的快照是安全的
+    // —— 那些資料本來就是從伺服器來的。
+    // （上一版擋掉所有快取快照，結果連正常的資料都進不來。）
+    if (!state.me.loaded && !s.exists() && s.metadata.fromCache) return;
 
     const d = s.data() || {};
     const first = !state.me.loaded;
@@ -377,7 +378,7 @@ async function onSignedIn(user) {
   unsubGru?.();
   let gruLoaded = false;
   unsubGru = F.onSnapshot(gruRef(uid), s => {
-    if (!gruLoaded && s.metadata.fromCache) return;    // 同理，別把空快取當成你的格魯
+    if (!gruLoaded && !s.exists() && s.metadata.fromCache) return;   // 同理，只擋空的快取快照
     gruLoaded = true;
     const d = s.data() || {};
     state.myGru = {
@@ -429,7 +430,17 @@ async function recoverOutbox(uid) {
     const it = o.items[t];
     if (!it || (!it.n && !it.fish && !it.gold)) continue;
     total += it.n;
-    flushTarget = t;
+    // 舊版有 bug 時會把對象記成 "null"（那時 viewing.uid 還沒載好）。
+    // 那種紀錄要算回自己身上，否則會一直寫向不存在的格魯、永遠補送不出去。
+    const to = (!t || t === 'null' || t === 'undefined') ? uid : t;
+    if (to !== t) {
+      console.log(`POPGRU 補送：把記成 ${t} 的 ${it.n} 下改算回自己身上`);
+      o.items[to] = o.items[to] || { n:0, fish:0, gold:0 };
+      o.items[to].n += it.n; o.items[to].fish += it.fish; o.items[to].gold += it.gold;
+      delete o.items[t];
+      outboxWrite(o);
+    }
+    flushTarget = to;
     state.pending += it.n; pendFish += it.fish; pendGold += it.gold;
     await flush();                       // 一次送一個對象
   }
@@ -526,12 +537,16 @@ export function squash() {
   if (v.isMine) state.myGru.squashes = v.squashes;
 
   if (state.mode === 'member') {
-    if (flushTarget && flushTarget !== v.uid) flush();
-    flushTarget = v.uid;
+    // 在自己家就直接用自己的 uid。之前依賴 state.viewing.uid，
+    // 而格魯快照還沒回來時那是 null —— 結果整批寫入的對象是 null，
+    // 格魯和小圈子總數兩份就被整個跳過，只有個人資料寫得出去。
+    const targetUid = v.isMine ? (state.me.uid || v.uid) : v.uid;
+    if (flushTarget && flushTarget !== targetUid) flush();
+    flushTarget = targetUid;
     state.pending += 1;
     pendFish += r.gained;
     if (r.goldfish) pendGold += 1;
-    outboxAdd(me.uid, v.uid, 1, r.gained, r.goldfish ? 1 : 0);   // 先落地再說
+    outboxAdd(me.uid, flushTarget, 1, r.gained, r.goldfish ? 1 : 0);   // 先落地再說
     scheduleFlush();                     // 停手 1.5 秒就寫出去，不要等滿 8 秒
     if (state.pending >= TUNING.maxPerFlush) flush();
   } else {
@@ -619,10 +634,15 @@ export async function flush() {
     // 寫入失敗必須看得見。之前只是 console.warn，結果整整一個多小時
     // 沒有任何資料寫進去，畫面上卻完全沒有徵兆。
     failCount++;
+    const authUid = fb.auth && fb.auth.currentUser && fb.auth.currentUser.uid;
     console.error(
       `POPGRU 寫入失敗 #${failCount}｜code=${e && e.code}｜${e && e.message}
 ` +
-      `  這批：+${n} 下 給 ${target}｜等在待送匣的不會掉，但伺服器沒收到`);
+      `  這批：+${n} 下 給 ${target}
+` +
+      `  登入身分=${authUid}  我方 uid=${me.uid}  ${authUid === me.uid ? '(一致)' : '(不一致！)'}
+` +
+      `  等在待送匣的不會掉，但伺服器沒收到`);
     if (failCount === 3) emit('writefail', { code: e && e.code, message: e && e.message });
     state.pending += n; pendFish += fish; pendGold += gold;
     flushTarget = target; if (patch) queuePatch(patch);

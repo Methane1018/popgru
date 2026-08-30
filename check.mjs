@@ -56,10 +56,17 @@ const check = (name, ok, detail = '') => {
   check('載入時會先用本機備份墊畫面', /if \(prefillFromMirror\(\)\)/.test(store));
   // Firestore 第一份快照可能來自空的本機快取。把它當真就會把資料讀成 0
   // 再寫回伺服器，真資料就沒了 —— 這是連勝歸零的真正原因。
-  check('個人資料忽略第一份快取快照',
-        /if \(!state\.me\.loaded && s\.metadata\.fromCache\) return;/.test(store));
-  check('格魯也忽略第一份快取快照',
-        /if \(!gruLoaded && s\.metadata\.fromCache\) return;/.test(store));
+  // 只能擋「空的」快取快照。擋掉所有快取快照會讓正常資料也進不來，
+  // 結果 state.viewing.uid 一直是 null，寫入對象變成 null。
+  check('個人資料只擋空的快取快照',
+        /if \(!state\.me\.loaded && !s\.exists\(\) && s\.metadata\.fromCache\) return;/.test(store));
+  check('格魯只擋空的快取快照',
+        /if \(!gruLoaded && !s\.exists\(\) && s\.metadata\.fromCache\) return;/.test(store));
+  check('在自己家時寫入對象用自己的 uid',
+        /const targetUid = v\.isMine \? \(state\.me\.uid \|\| v\.uid\) : v\.uid;/.test(store));
+  check('待送匣記的是同一個對象', /outboxAdd\(me\.uid, flushTarget,/.test(store));
+  check('待送匣不收空對象', /if \(!uid \|\| !target\) return;/.test(store));
+  check('補送會把 null 對象算回自己', /t === 'null' \|\| t === 'undefined'/.test(store));
 }
 
 // 2) 待送匣讀寫格式要對得上（曾經一邊寫舊格式、一邊讀新格式，補送整個失效）
