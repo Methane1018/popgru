@@ -8,7 +8,7 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME,
-} from './config.js?v=6';
+} from './config.js?v=7';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -19,6 +19,12 @@ const INVITE_OK = 'popgru.invited';
 export const configured = Object.keys(firebaseConfig).length > 0;
 
 /* ------------------------------------------------------------------ 日期 -- */
+// 「無名氏」是顯示用的佔位字串，不是名字。
+// 舊版曾經把它寫進資料庫（ownerName / name），所以讀的時候要濾掉，
+// 寫的時候也絕對不寫進去 —— 否則佔位字串會變成某人真正的名字。
+const NO_NAME = '無名氏';
+const realName = v => (typeof v === 'string' && v.trim() && v.trim() !== NO_NAME) ? v.trim() : null;
+
 const pad = n => String(n).padStart(2, '0');
 export const dayStr = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 export function dayDiff(a, b) {
@@ -168,14 +174,16 @@ async function onSignedIn(user) {
   }
   state.gated = false;
   state.mode  = 'member';
-  const gName = user.displayName || '無名氏';
-  Object.assign(state.me, { uid, googleName: gName, name: gName, photo: user.photoURL || null });
+  const gName = realName(user.displayName);            // 沒有就是 null，不是「無名氏」
+  Object.assign(state.me, {
+    uid, googleName: gName, name: gName || NO_NAME, photo: user.photoURL || null,
+  });
 
   const guest = loadGuest();
   try {
-    await F.setDoc(userRef(uid), {
-      googleName: gName, photo: state.me.photo, lastSeen: F.serverTimestamp(),
-    }, { merge: true });
+    const mine = { photo: state.me.photo, lastSeen: F.serverTimestamp() };
+    if (gName) mine.googleName = gName;                 // 沒有真名就不要寫
+    await F.setDoc(userRef(uid), mine, { merge: true });
     const g = await F.getDoc(gruRef(uid));
     if (!g.exists()) {                                  // 第一次登入 → 開一隻格魯
       await F.setDoc(gruRef(uid), {
@@ -207,9 +215,9 @@ async function onSignedIn(user) {
       streak:d.streak||0, bestStreak:d.bestStreak||0,
       lastDay:d.lastDay||null, todayCount:d.todayCount||0,
       helpToday:d.helpToday||0, helpDay:d.helpDay||null,
-      nick: d.nick || null,
-      googleName: d.googleName || state.me.googleName,
-      name: d.nick || d.googleName || state.me.googleName || '無名氏',
+      nick: realName(d.nick),
+      googleName: realName(d.googleName) || state.me.googleName,
+      name: realName(d.nick) || realName(d.googleName) || state.me.googleName || NO_NAME,
       photo: d.photo || state.me.photo,
     });
     sync();
@@ -435,14 +443,16 @@ export async function setGruName(name) {
 
 // 暱稱。同時要更新格魯上的 ownerName，名單才看得到新名字。
 export async function setNick(n) {
-  const nick = String(n || '').trim().slice(0, 12);
-  state.me.nick = nick || null;
-  state.me.name = nick || state.me.googleName || '無名氏';
+  // realName() 也擋掉有人直接把暱稱打成「無名氏」——那樣會跟「沒設定」
+  // 長得一模一樣，別人根本分不出來
+  const nick = realName(String(n || '').slice(0, 12));
+  state.me.nick = nick;
+  state.me.name = nick || state.me.googleName || NO_NAME;
   sync();
   if (state.mode === 'member' && fb) {
     const { F } = fb;
     const b = F.writeBatch(fb.db);
-    b.set(userRef(state.me.uid), { nick: nick || null, name: state.me.name }, { merge:true });
+    b.set(userRef(state.me.uid), { nick: nick, name: state.me.name }, { merge:true });
     b.set(gruRef(state.me.uid),  { ownerName: state.me.name }, { merge:true });
     // 不 await：Firestore 離線時會把寫入排隊，await 下去畫面就卡住了
     b.commit().then(() => loadRoster()).catch(e => console.warn('改暱稱失敗：', e));

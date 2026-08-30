@@ -1,11 +1,11 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=6';
+import * as S from './store.js?v=7';
 import {
   TUNING, ITEMS, MILESTONES, HATS, SILLY_HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION,
-} from './config.js?v=6';
+} from './config.js?v=7';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -13,6 +13,9 @@ const $  = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag);
   if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 const nf = n => (n || 0).toLocaleString('en-US');
+// 舊版可能把「無名氏」寫進別人的 ownerName，顯示時當成沒設定
+const who = (v, fallback = '某人') =>
+  (v && v !== '無名氏') ? v : fallback;
 
 /* ------------------------------------------------------------- 時間格式 -- */
 const ms = t => !t ? 0 : (typeof t === 'number' ? t : (t.toMillis ? t.toMillis() : +new Date(t)));
@@ -304,7 +307,7 @@ function panelPeople(body) {
     const mid = el('div', 'row-mid');
     mid.append(el('div', 'row-title', `${g.hat || ''} ${g.name || DEFAULT_GRU_NAME}`.trim()));
     mid.append(el('div', 'row-sub',
-      `${g.ownerName || '某人'} · ${nf(g.squashes)} 下 · ${ago(g.lastSquashedAt) || '還沒被壓過'}`));
+      `${who(g.ownerName)} · ${nf(g.squashes)} 下 · ${ago(g.lastSquashedAt) || '還沒被壓過'}`));
     row.append(mid);
 
     const acts = el('div', 'row-acts');
