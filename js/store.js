@@ -8,7 +8,7 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo,
-} from './config.js?v=8';
+} from './config.js?v=9';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -44,7 +44,7 @@ const emit = (evt, d) => listeners[evt]?.forEach(fn => { try { fn(d); } catch (e
 /* ----------------------------------------------------------------- state -- */
 const blankMe = () => ({
   uid:null, name:null, googleName:null, nick:null, photo:null,
-  lifetime:0, fish:0, goldfish:0, medals:0, freezes:0, double:0, ownedHats:[],
+  lifetime:0, fish:0, goldfish:0, medals:0, freezes:0, double:0, ownedHats:[], loaded:false,
   streak:0, bestStreak:0, lastDay:null, todayCount:0, helpToday:0, helpDay:null,
 });
 const blankGru = () => ({
@@ -115,31 +115,36 @@ function applyGuest() {
 function outboxRead() {
   try {
     const o = JSON.parse(localStorage.getItem(OUTBOX_KEY) || 'null');
-    return (o && o.uid) ? o : null;
+    if (!o || !o.uid) return null;
+    // 相容舊格式：以前一次只記一個對象
+    if (!o.items && o.target) return { uid:o.uid, items:{ [o.target]:{ n:o.n||0, fish:o.fish||0, gold:o.gold||0 } } };
+    return (o.items && typeof o.items === 'object') ? o : null;
   } catch { return null; }
 }
 function outboxWrite(o) {
   try {
-    if (!o || (!o.n && !o.fish && !o.gold)) localStorage.removeItem(OUTBOX_KEY);
+    if (!o || !o.items || !Object.keys(o.items).length) localStorage.removeItem(OUTBOX_KEY);
     else localStorage.setItem(OUTBOX_KEY, JSON.stringify(o));
   } catch {}
 }
-// 每次壓扁就累加（很小的物件，成本可以忽略）
+// 每個對象各記一筆。之前只記一個對象，一從自己家換去朋友家，
+// 自己家還沒送出去的那些就被整筆蓋掉了。
 function outboxAdd(uid, target, n, fish, gold) {
-  const o = outboxRead();
-  if (o && o.uid === uid && o.target === target) {
-    o.n += n; o.fish += fish; o.gold += gold; outboxWrite(o);
-  } else {
-    // 換人家了：先把舊的送出去（下面 flush 會處理），這裡直接開新的一筆
-    outboxWrite({ uid, target, n, fish, gold });
-  }
+  const o = outboxRead() || { uid, items:{} };
+  if (o.uid !== uid) { o.uid = uid; o.items = {}; }      // 換帳號就重來
+  const it = o.items[target] || { n:0, fish:0, gold:0 };
+  it.n += n; it.fish += fish; it.gold += gold;
+  o.items[target] = it;
+  outboxWrite(o);
 }
-// 寫入成功之後扣掉這次送出的量（期間可能又累積了新的點擊，所以是扣不是清空）
+// 寫入成功才扣掉這次送出的量（期間可能又累積了新的點擊，所以是扣不是清空）
 function outboxSettle(uid, target, n, fish, gold) {
   const o = outboxRead();
-  if (!o || o.uid !== uid || o.target !== target) return;
-  o.n -= n; o.fish -= fish; o.gold -= gold;
-  outboxWrite((o.n > 0 || o.fish > 0 || o.gold > 0) ? o : null);
+  if (!o || o.uid !== uid || !o.items[target]) return;
+  const it = o.items[target];
+  it.n -= n; it.fish -= fish; it.gold -= gold;
+  if (it.n <= 0 && it.fish <= 0 && it.gold <= 0) delete o.items[target];
+  outboxWrite(o);
 }
 
 /* --------------------------------------------------------------- firebase -- */
@@ -307,12 +312,22 @@ async function claimGuestProgress(uid) {
 // 上次關頁沒送出去的點擊，開啟時補送
 async function recoverOutbox(uid) {
   const o = outboxRead();
-  if (!o || o.uid !== uid || (!o.n && !o.fish && !o.gold)) return;
-  console.log(`POPGRU: 補送上次未寫入的 ${o.n} 下`);
-  flushTarget = o.target;
-  state.pending += o.n; pendFish += o.fish; pendGold += o.gold;
-  await flush();
-  emit('recovered', o);
+  if (!o || o.uid !== uid) return;
+  const targets = Object.keys(o.items || {});
+  if (!targets.length) return;
+  let total = 0;
+  for (const t of targets) {
+    const it = o.items[t];
+    if (!it || (!it.n && !it.fish && !it.gold)) continue;
+    total += it.n;
+    flushTarget = t;
+    state.pending += it.n; pendFish += it.fish; pendGold += it.gold;
+    await flush();                       // 一次送一個對象
+  }
+  if (total) {
+    console.log(`POPGRU: 補送上次沒寫入的 ${total} 下`);
+    emit('recovered', { n: total });
+  }
 }
 
 export async function signIn()  { if (!fb) throw new Error('尚未設定 Firebase');
@@ -406,6 +421,7 @@ export function squash() {
     pendFish += r.gained;
     if (r.goldfish) pendGold += 1;
     outboxAdd(me.uid, v.uid, 1, r.gained, r.goldfish ? 1 : 0);   // 先落地再說
+    scheduleFlush();                     // 停手 1.5 秒就寫出去，不要等滿 8 秒
     if (state.pending >= TUNING.maxPerFlush) flush();
   } else {
     state.global.squashes += 0;                      // 訪客不計入小圈子
@@ -416,11 +432,22 @@ export function squash() {
 }
 
 /* ------------------------------------------------------------ 批次寫入 -- */
-let pendFish = 0, pendGold = 0, pendPatch = null, flushing = false;
+let pendFish = 0, pendGold = 0, pendPatch = null, flushing = false, flushTimer = null;
+
+// 停手之後很快就寫出去。原本只靠 8 秒的定時批次，壓兩下馬上關掉就來不及。
+// 連續狂點時 timer 會一直被重設，所以一整串點擊仍然只算一次寫入。
+function scheduleFlush() {
+  clearTimeout(flushTimer);
+  flushTimer = setTimeout(() => flush(), TUNING.quietFlushMs);
+}
 const queuePatch = p => { pendPatch = { ...(pendPatch||{}), ...p }; };
 
 export async function flush() {
-  if (state.mode !== 'member' || !fb || flushing) return;
+  if (state.mode !== 'member' || !fb) return;
+  // 前一次還在送就晚點再試。少了這個重排，送出期間累積的點擊
+  // 要等 8 秒的保底定時器才會被撿走，剛好卡在「壓完馬上關掉」的空隙。
+  if (flushing) { scheduleFlush(); return; }
+  clearTimeout(flushTimer);
   const n = state.pending, fish = pendFish, gold = pendGold, patch = pendPatch, target = flushTarget;
   if (!n && !fish && !gold && !patch) return;
 
@@ -429,13 +456,14 @@ export async function flush() {
   const { F, db } = fb, me = state.me;
   try {
     const b = F.writeBatch(db);
-    const p = {
-      lastSeen: F.serverTimestamp(),
+    // 絕對欄位只有在個人資料真的讀進來之後才寫回去。
+    // 否則補送時（快照還沒回來）會把連續天數、凍結卡、雙倍卡全部覆寫成 0。
+    const p = { lastSeen: F.serverTimestamp(), ...(patch || {}) };
+    if (me.loaded) Object.assign(p, {
       streak: me.streak, bestStreak: me.bestStreak, lastDay: me.lastDay,
       todayCount: me.todayCount, helpToday: me.helpToday, helpDay: me.helpDay,
       freezes: me.freezes, double: me.double,
-      ...(patch || {}),
-    };
+    });
     if (n)    p.lifetime = F.increment(n);
     if (fish) p.fish     = F.increment(fish);
     if (gold) p.goldfish = F.increment(gold);
@@ -459,7 +487,10 @@ export async function flush() {
     console.warn('寫入失敗，稍後重試：', e);
     state.pending += n; pendFish += fish; pendGold += gold;
     flushTarget = target; if (patch) queuePatch(patch);
-  } finally { flushing = false; }
+  } finally {
+    flushing = false;
+    if (state.pending || pendFish || pendGold) scheduleFlush();   // 期間又累積了就再送
+  }
 }
 
 /* ----------------------------------------------------------- 名單 / 足跡 -- */

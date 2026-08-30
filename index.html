@@ -147,16 +147,14 @@
   .emoji-btn.locked{opacity:.3; cursor:default}
   .emoji-btn.poor{opacity:.55}          /* 買得到，但魚不夠 */
 
-  .toast{position:fixed; left:50%; bottom:calc(18px + env(safe-area-inset-bottom));
-         transform:translate(-50%,14px); z-index:30; max-width:min(440px,92vw);
+  /* 提示固定在標題列正下方。放在畫面底部會蓋住商店／信箱那排按鈕，
+     放在這裡最多只擋到一行說明文字，而且面板打開時也不會擋到內容。 */
+  .toast{position:fixed; left:50%; top:calc(46px + env(safe-area-inset-top));
+         transform:translate(-50%,-14px); z-index:30; max-width:min(440px,92vw);
          background:var(--ink); color:var(--bg); font-size:13px; font-weight:700;
          padding:11px 16px; border-radius:999px; text-align:center;
          opacity:0; pointer-events:none; transition:opacity .18s, transform .18s}
   .toast.show{opacity:1; transform:translate(-50%,0)}
-  /* 面板打開時提示改從上面出現，才不會蓋住商店／信箱的內容 */
-  body.sheet-open .toast{bottom:auto; top:calc(14px + env(safe-area-inset-top));
-                         transform:translate(-50%,-14px)}
-  body.sheet-open .toast.show{transform:translate(-50%,0)}
 
   .hint-sm{font-size:12.5px; color:var(--muted); line-height:1.55; margin:2px 4px 10px}
   .hat-cell{display:flex; flex-direction:column; align-items:center; gap:3px}
@@ -230,6 +228,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=8"></script>
+<script type="module" src="js/app.js?v=9"></script>
 </body>
 </html>

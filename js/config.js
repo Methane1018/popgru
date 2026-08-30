@@ -22,7 +22,7 @@ export const firebaseConfig = {
 
 // 目前版本。載入時會印在主控台，用來確認朋友拿到的是不是新版。
 // 跑 ./bump.sh 會自動加一（同時更新所有 import 上的 ?v=）。
-export const APP_VERSION = 8;
+export const APP_VERSION = 9;
 
 // Firebase SDK 版本。萬一載入失敗，改這個數字就好。
 export const FIREBASE_VERSION = '11.6.0';
@@ -47,7 +47,8 @@ export const TUNING = {
                            //   額度用完還是壓得動，只是不計分。
   guestMaxClaim:   3000,   // 訪客最多能把幾下帶進小圈子（登入時補算）
   fishPerSquash:   1,      // 每次計分得幾條魚
-  flushMs:         8000,   // 幾毫秒把累積點擊批次寫進資料庫一次
+  flushMs:         8000,   // 定時批次寫入的間隔（保底）
+  quietFlushMs:    1500,   // 停手多久之後就寫出去。壓兩下馬上關掉時就靠這個
   maxPerFlush:     2000,   // 單次批次上限，規則層擋 5000
   goldfishOdds:    500,    // 每 N 次計分，有一次企鵝彈不回來並掉一條金魚
   doubleClicks:    100,    // 雙倍魚卡生效幾次點擊

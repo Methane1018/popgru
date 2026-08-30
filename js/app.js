@@ -1,11 +1,11 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=8';
+import * as S from './store.js?v=9';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION,
-} from './config.js?v=8';
+} from './config.js?v=9';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
