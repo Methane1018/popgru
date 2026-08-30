@@ -18,7 +18,7 @@ const check = (name, ok, detail = '') => {
 //    少一邊就會出現「幫忙額度自己跳回 300」「連續天數歸零」。
 {
   const w = store.match(/const p = \{\s*lastSeen: F\.serverTimestamp\(\),(.*?)\.\.\.\(patch/s);
-  const r = store.match(/if \(first\) \{\s*Object\.assign\(state\.me, \{(.*?)\}\);/s);
+  const r = store.match(/const srv = \{(.*?)\};/s);
   if (!w || !r) check('flush 與快照的絕對欄位區塊都存在', false, '找不到其中一段');
   else {
     const W = new Set([...w[1].matchAll(/(\w+):/g)].map(m => m[1]));
@@ -32,7 +32,20 @@ const check = (name, ok, detail = '') => {
   check('me.loaded 恰好被設 true 一次', n === 1, `${n} 次`);
   // 這一條是關鍵：個人資料沒讀到就絕對不能寫，否則會把初始值 0 覆寫上去
   check('flush 會等個人資料載入', /if \(!state\.me\.loaded\) \{ scheduleFlush\(\); return; \}/.test(store));
-  check('載入完會主動放行一次 flush', /state\.me\.loaded = true[\s\S]{0,400}?flush\(\);/.test(store));
+  check('載入完會主動放行一次 flush', /state\.me\.loaded = true[\s\S]{0,1400}?\n      flush\(\);/.test(store));
+  // 鏡像涵蓋的欄位必須跟 flush 寫回的完全一樣，否則會有欄位無人保護
+  const mf = store.match(/const MIRROR_FIELDS = \[(.*?)\];/s);
+  if (!mf) check('MIRROR_FIELDS 存在', false);
+  else {
+    const M = new Set([...mf[1].matchAll(/'(\w+)'/g)].map(m => m[1]));
+    const W = new Set([...(store.match(/const p = \{\s*lastSeen: F\.serverTimestamp\(\),(.*?)\.\.\.\(patch/s) || ['',''])[1]
+                        .matchAll(/(\w+):/g)].map(m => m[1]));
+    const onlyW = [...W].filter(x => !M.has(x));
+    const onlyM = [...M].filter(x => !W.has(x));
+    check('鏡像欄位與 flush 寫回一致', !onlyW.length && !onlyM.length,
+          `只寫不鏡像=${onlyW} 只鏡像不寫=${onlyM}`);
+  }
+  check('每次 sync 都會存鏡像', /const sync = \(\) => \{ mirrorSave\(\);/.test(store));
 }
 
 // 2) 待送匣讀寫格式要對得上（曾經一邊寫舊格式、一邊讀新格式，補送整個失效）

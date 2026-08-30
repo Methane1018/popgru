@@ -8,13 +8,14 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
-} from './config.js?v=0.5.1';
+} from './config.js?v=0.5.2';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
 const SEEN_KEY  = 'popgru.lastSeenGlobal';
 const POKE_KEY  = 'popgru.pokes';
 const OUTBOX_KEY = 'popgru.outbox';   // 還沒寫進 Firestore 的點擊，撐過關頁／重整／當掉
+const MIRROR_KEY = 'popgru.mirror';  // 連勝等「絕對值」欄位的本機備份
 const INVITE_OK = 'popgru.invited';
 
 export const configured = Object.keys(firebaseConfig).length > 0;
@@ -78,7 +79,7 @@ export const state = {
   pending: 0,
 };
 
-const sync = () => emit('state', state);
+const sync = () => { mirrorSave(); emit('state', state); };
 
 // 今天還剩多少額度（會自動處理跨日，所以還沒壓之前顯示也是對的）
 export function dailyLeft() {
@@ -162,6 +163,28 @@ function outboxSettle(uid, target, n, fish, gold) {
   it.n -= n; it.fish -= fish; it.gold -= gold;
   if (it.n <= 0 && it.fish <= 0 && it.gold <= 0) delete o.items[target];
   outboxWrite(o);
+}
+
+/* ------------------------------------------------- 絕對值欄位的本機鏡像 -- */
+// 連勝、凍結卡、雙倍魚、幫忙額度這些是「絕對值」，只有這台裝置在寫。
+// 只要有任何一次沒寫成功，重整就會被伺服器上的舊值蓋回去。
+// 所以每次變動都在本機留一份，載入時比日期挑比較新的那份。
+// 這樣就算伺服器那邊完全沒寫進去，重整也不會掉。
+const MIRROR_FIELDS = ['streak','bestStreak','lastDay','todayCount','helpToday','helpDay','freezes','double'];
+
+function mirrorSave() {
+  if (state.mode !== 'member' || !state.me.uid || !state.me.loaded) return;
+  try {
+    const o = { uid: state.me.uid, at: Date.now() };
+    for (const f of MIRROR_FIELDS) o[f] = state.me[f];
+    localStorage.setItem(MIRROR_KEY, JSON.stringify(o));
+  } catch {}
+}
+function mirrorRead(uid) {
+  try {
+    const o = JSON.parse(localStorage.getItem(MIRROR_KEY) || 'null');
+    return (o && o.uid === uid) ? o : null;
+  } catch { return null; }
 }
 
 /* --------------------------------------------------------------- firebase -- */
@@ -290,19 +313,32 @@ async function onSignedIn(user) {
     // 症狀就是幫忙額度自己跳回 300、連續天數莫名歸零。
     // 所以只在第一次載入時採用伺服器的值，之後以本機為準。
     if (first) {
-      Object.assign(state.me, {
+      const srv = {
         streak:d.streak||0, bestStreak:d.bestStreak||0,
         lastDay:d.lastDay||null, todayCount:d.todayCount||0,
         helpToday:d.helpToday||0, helpDay:d.helpDay||null,
         freezes:d.freezes||0, double:d.double||0,
-      });
+      };
+      // 本機鏡像只要「不比伺服器舊」就以本機為準。
+      // 'YYYY-MM-DD' 直接字串比大小就等於比日期。
+      const mir = mirrorRead(uid);
+      const useMirror = !!mir && (mir.lastDay || '') >= (srv.lastDay || '');
+      const pickd = {};
+      for (const f of MIRROR_FIELDS) pickd[f] = useMirror ? mir[f] : srv[f];
+      Object.assign(state.me, pickd);
       state.me.loaded = true;      // 有了這個，flush() 才會開始寫
       repairStreak();
+
       const m = state.me;
-      console.log('POPGRU 讀到個人資料：',
-        `連勝=${m.streak} 最後一天=${m.lastDay} 今日=${m.todayCount} ` +
-        `幫忙=${m.helpToday}/${m.helpDay} 凍結卡=${m.freezes} 雙倍=${m.double} ` +
+      console.log(
+        `POPGRU 個人資料｜採用=${useMirror ? '本機鏡像' : '伺服器'}\n` +
+        `  伺服器：連勝=${srv.streak} 最後一天=${srv.lastDay} 凍結卡=${srv.freezes} ` +
+        `雙倍=${srv.double} 幫忙=${srv.helpToday}/${srv.helpDay}\n` +
+        `  本機　：${mir ? `連勝=${mir.streak} 最後一天=${mir.lastDay} 凍結卡=${mir.freezes} `
+                        + `雙倍=${mir.double} 幫忙=${mir.helpToday}/${mir.helpDay}` : '（沒有備份）'}\n` +
+        `  結果　：連勝=${m.streak} 凍結卡=${m.freezes} 雙倍=${m.double} 幫忙=${m.helpToday} ` +
         `魚=${m.fish} 累計=${m.lifetime}`);
+
       flush();                     // 資料到齊，把等在門口的寫入放行
     }
     sync();
