@@ -7,8 +7,8 @@
 // ============================================================================
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
-  ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo,
-} from './config.js?v=0.4.0';
+  ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
+} from './config.js?v=0.5.0';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -36,6 +36,18 @@ export function dayDiff(a, b) {
 }
 export const streakAlive = lastDay => { const g = dayDiff(lastDay, dayStr()); return g !== null && g <= 1; };
 
+// 不變量：lastDay 是今天，就代表今天玩過，連續天數不可能是 0。
+// 之前有個 bug 把 streak 寫成 0 而 lastDay 已經是今天，結果整天卡在 0 ——
+// 因為加一的邏輯只在「換日」時才跑。這裡把它補回來。
+function repairStreak() {
+  if (state.me.lastDay === dayStr() && !state.me.streak) {
+    state.me.streak = 1;
+    state.me.bestStreak = Math.max(state.me.bestStreak || 0, 1);
+    return true;
+  }
+  return false;
+}
+
 /* ---------------------------------------------------------------- events -- */
 const listeners = {};
 export const on = (evt, fn) => ((listeners[evt] ||= new Set()).add(fn), () => listeners[evt].delete(fn));
@@ -44,12 +56,13 @@ const emit = (evt, d) => listeners[evt]?.forEach(fn => { try { fn(d); } catch (e
 /* ----------------------------------------------------------------- state -- */
 const blankMe = () => ({
   uid:null, name:null, googleName:null, nick:null, photo:null,
-  lifetime:0, fish:0, goldfish:0, medals:0, freezes:0, double:0, ownedHats:[], loaded:false,
+  lifetime:0, fish:0, goldfish:0, medals:0, freezes:0, double:0,
+  ownedHats:[], ownedSkins:[], loaded:false,
   streak:0, bestStreak:0, lastDay:null, todayCount:0, helpToday:0, helpDay:null,
 });
 const blankGru = () => ({
   uid:null, name:DEFAULT_GRU_NAME, ownerName:null, ownerPhoto:null,
-  hat:null, squashes:0, isMine:true,
+  hat:null, squashes:0, isMine:true, skin:defaultSkin(),
 });
 
 export const state = {
@@ -89,7 +102,9 @@ function saveGuest() {
   try {
     localStorage.setItem(GUEST_KEY, JSON.stringify({
       lifetime, fish, goldfish, streak, bestStreak, lastDay, todayCount, nick, ownedHats,
+      ownedSkins: state.me.ownedSkins,
       gruName: state.myGru.name, gruHat: state.myGru.hat, gruSquashes: state.myGru.squashes,
+      gruSkin: state.myGru.skin,
     }));
   } catch {}
 }
@@ -101,9 +116,11 @@ function applyGuest() {
     lastDay:g.lastDay||null, todayCount:g.todayCount||0,
     nick:g.nick||null, name:g.nick||null,
     ownedHats: Array.isArray(g.ownedHats) ? g.ownedHats : [],
+    ownedSkins: Array.isArray(g.ownedSkins) ? g.ownedSkins : [],
   });
   Object.assign(state.myGru, blankGru(), {
     name:g.gruName||DEFAULT_GRU_NAME, hat:g.gruHat||null, squashes:g.gruSquashes||0,
+    skin: { ...defaultSkin(), ...(g.gruSkin || {}) },
   });
   state.viewing = { ...state.myGru, isMine:true };
 }
@@ -261,6 +278,7 @@ async function onSignedIn(user) {
         ...(Array.isArray(d.ownedHats) ? d.ownedHats : []),
         ...(state.myGru.hat ? [state.myGru.hat] : []),
       ])),
+      ownedSkins: Array.isArray(d.ownedSkins) ? d.ownedSkins : [],
       nick: realName(d.nick),
       googleName: realName(d.googleName) || state.me.googleName,
       name: realName(d.nick) || realName(d.googleName) || state.me.googleName || NO_NAME,
@@ -279,6 +297,7 @@ async function onSignedIn(user) {
         freezes:d.freezes||0, double:d.double||0,
       });
       state.me.loaded = true;      // 有了這個，flush() 才會開始寫回這些欄位
+      if (repairStreak()) queuePatch({ streak: state.me.streak, bestStreak: state.me.bestStreak });
     }
     sync();
   }, e => console.warn('讀取個人資料失敗：', e));
@@ -290,6 +309,7 @@ async function onSignedIn(user) {
       uid, name:d.name||DEFAULT_GRU_NAME, ownerName:d.ownerName||state.me.name,
       ownerPhoto:d.ownerPhoto||state.me.photo, hat:d.hat||null,
       squashes:d.squashes||0, isMine:true,
+      skin: { ...defaultSkin(), ...(d.skin || {}) },
     };
     if (state.viewing.isMine) state.viewing = { ...state.myGru };
     sync();
@@ -367,6 +387,7 @@ export async function visit(uid) {
     state.viewing = {
       uid, name:d.name||DEFAULT_GRU_NAME, ownerName:d.ownerName||'某人',
       ownerPhoto:d.ownerPhoto||null, hat:d.hat||null, squashes:d.squashes||0, isMine:false,
+      skin: { ...defaultSkin(), ...(d.skin || {}) },     // 別人家會套用別人的外觀
     };
     sync();
     return true;
@@ -404,6 +425,7 @@ export function squash() {
     r.newDay      = true;
   }
   if (me.helpDay !== today) { me.helpDay = today; me.helpToday = 0; }
+  repairStreak();                            // 防呆：今天玩過就不該是 0 天
 
   const overDaily = TUNING.dailyCap > 0 && me.todayCount >= TUNING.dailyCap;
   const overHelp  = !v.isMine && TUNING.helpCap > 0 && me.helpToday >= TUNING.helpCap;
@@ -579,6 +601,44 @@ export async function buyHat(emoji) {
       .catch(e => console.warn('解鎖帽子失敗：', e));
   } else { saveGuest(); }
   await setHat(emoji);                       // 解鎖後直接戴上
+}
+
+/* ----------------------------------------------------------------- 外觀 -- */
+const skinKey = (kind, id) => `${kind}:${id}`;
+// 預設款（cost 0）視同人人都有
+export const ownsSkin = (kind, id) =>
+  skinInfo(kind, id)?.cost === 0 || state.me.ownedSkins.includes(skinKey(kind, id));
+export const skinLocked = (kind, id) => (skinInfo(kind, id)?.need || 0) > state.global.squashes;
+
+export async function buySkin(kind, id) {
+  const info = skinInfo(kind, id);
+  if (!info) throw new Error('沒有這個外觀');
+  if (ownsSkin(kind, id))   throw new Error('已經解鎖過了');
+  if (skinLocked(kind, id)) throw new Error(`要小圈子壓到 ${info.need.toLocaleString('en-US')} 下才解得開`);
+  if (state.me.fish < info.cost) throw new Error('魚不夠');
+
+  state.me.fish -= info.cost;
+  state.me.ownedSkins = [...state.me.ownedSkins, skinKey(kind, id)];
+  sync();
+  if (state.mode === 'member' && fb) {
+    const { F } = fb;
+    F.setDoc(userRef(state.me.uid),
+      { fish: F.increment(-info.cost), ownedSkins: F.arrayUnion(skinKey(kind, id)) }, { merge:true })
+      .catch(e => console.warn('解鎖外觀失敗：', e));
+  } else { saveGuest(); }
+  await setSkin(kind, id);
+}
+
+// 換已解鎖的外觀（免費）。外觀存在格魯上，所以來訪的人也會看到。
+export async function setSkin(kind, id) {
+  if (!ownsSkin(kind, id)) throw new Error('還沒解鎖這個外觀');
+  state.myGru.skin = { ...state.myGru.skin, [kind]: id };
+  if (state.viewing.isMine) state.viewing.skin = { ...state.myGru.skin };
+  sync();
+  if (state.mode === 'member' && fb) {
+    fb.F.setDoc(gruRef(state.me.uid), { skin: state.myGru.skin }, { merge:true })
+      .catch(e => console.warn('存外觀失敗：', e));
+  } else { saveGuest(); }
 }
 
 // 換戴已解鎖的帽子（免費），或傳 null 脫掉

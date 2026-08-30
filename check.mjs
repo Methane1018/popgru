@@ -86,10 +86,24 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
 
 // 6) 帽子的解鎖門檻要對得上里程碑，不然進度條寫的解鎖品項是騙人的
 {
-  const needs = [...cfg.matchAll(/need:\s*(\d+)/g)].map(m => +m[1]).filter(n => n > 0);
   const ms = [...cfg.matchAll(/\{ at:\s*(\d+)/g)].map(m => +m[1]);
+  // 只看 HATS 那一段，別把 SKINS 的 need 也算進來
+  const hatsBlock = (cfg.match(/export const HATS = \[(.*?)\];/s) || ['', ''])[1];
+  const needs = [...hatsBlock.matchAll(/need:\s*(\d+)/g)].map(m => +m[1]).filter(n => n > 0);
   check('帽子門檻對齊里程碑', JSON.stringify(needs) === JSON.stringify(ms),
         `帽子=${needs} 里程碑=${ms}`);
+
+  // 外觀的門檻也必須是里程碑上真的存在的數字，不然玩家永遠解不開
+  const skinsBlock = (cfg.match(/export const SKINS = \{(.*?)\n\};/s) || ['', ''])[1];
+  const sNeeds = [...skinsBlock.matchAll(/need:\s*(\d+)/g)].map(m => +m[1]).filter(n => n > 0);
+  const bad = [...new Set(sNeeds)].filter(n => !ms.includes(n));
+  check('外觀門檻都落在里程碑上', !bad.length, `這些數字不是里程碑：${bad}`);
+
+  // 每一類外觀都要有一款預設（cost 0），否則新玩家沒東西可用
+  for (const k of ['bg', 'tint', 'font']) {
+    const block = (skinsBlock.match(new RegExp(k + ':\\s*\\[(.*?)\\]', 's')) || ['', ''])[1];
+    check(`外觀 ${k} 有預設款`, /cost:\s*0\b/.test(block));
+  }
 }
 
 console.log(bad ? `\n${bad} 項沒過` : '\n全部通過');

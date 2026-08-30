@@ -27,7 +27,15 @@
   html,body{height:100%}
   body{
     margin:0; min-height:100dvh; color:var(--ink);
-    background:radial-gradient(120% 90% at 50% 0%,var(--bg) 0%,var(--bg-2) 100%);
+    /* 三層：表情符號平鋪 → 顏色薄膜 → 原本的底色漸層。
+       薄膜用半透明疊在現有底色上，所以亮色和深色模式都不會壞掉，
+       不必為每個背景各寫一套配色。 */
+    background:
+      var(--skin-tile, none),
+      var(--skin-wash, none),
+      radial-gradient(120% 90% at 50% 0%,var(--bg) 0%,var(--bg-2) 100%);
+    background-repeat:repeat, no-repeat, no-repeat;
+    background-attachment:fixed, fixed, fixed;
     font-family:ui-rounded,-apple-system,BlinkMacSystemFont,"Segoe UI Variable Display","Segoe UI",
                 "PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;
     display:flex; flex-direction:column; align-items:center;
@@ -75,6 +83,21 @@
   .count{font-size:clamp(42px,13vw,80px); font-weight:900; line-height:1.05; letter-spacing:-.03em;
          font-variant-numeric:tabular-nums}
   .count.bump{animation:bump .18s cubic-bezier(.3,1.6,.5,1)}
+
+  /* ---------- 外觀 ---------- */
+  body[data-bg="sunset"]{--skin-wash:linear-gradient(rgba(255,138,64,.17),rgba(255,138,64,.17))}
+  body[data-bg="mint"]  {--skin-wash:linear-gradient(rgba(40,205,150,.17),rgba(40,205,150,.17))}
+  body[data-bg="grape"] {--skin-wash:linear-gradient(rgba(150,110,240,.17),rgba(150,110,240,.17))}
+  body[data-bg="night"] {--skin-wash:linear-gradient(rgba(16,26,56,.34),rgba(16,26,56,.34))}
+
+  body[data-font="mono"]    .count{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:-.01em}
+  body[data-font="shadow"]  .count{text-shadow:3px 3px 0 var(--line), 6px 6px 0 var(--bg-2)}
+  body[data-font="glow"]    .count{color:var(--accent); text-shadow:0 0 18px var(--accent), 0 0 44px var(--accent)}
+  body[data-font="gold"]    .count{background:linear-gradient(180deg,#ffe9a3,#d4a017 55%,#8a6207);
+                                   -webkit-background-clip:text; background-clip:text; color:transparent;
+                                   text-shadow:none; filter:drop-shadow(0 2px 1px rgba(0,0,0,.25))}
+  body[data-font="rainbow"] .count{background:linear-gradient(90deg,#ff5f6d,#ffc371,#47e08a,#4facfe,#c471ed);
+                                   -webkit-background-clip:text; background-clip:text; color:transparent}
   @keyframes bump{0%{transform:scale(1)}40%{transform:scale(1.09)}100%{transform:scale(1)}}
 
   .bar{width:100%; max-width:340px; margin-top:6px}
@@ -96,7 +119,8 @@
          cursor:pointer; touch-action:manipulation; container-type:inline-size}
   .stage:focus-visible{outline:3px solid var(--accent); outline-offset:6px; border-radius:18px}
   .stage img{position:absolute; inset:0; width:100%; height:100%; object-fit:contain;
-             object-position:center bottom; -webkit-user-drag:none; pointer-events:none}
+             object-position:center bottom; -webkit-user-drag:none; pointer-events:none;
+             filter:var(--skin-tint, none)}
   .hide{visibility:hidden}
 
   /* 地面陰影，跟著姿勢硬切，不做過場 */
@@ -169,6 +193,12 @@
   .emoji-btn.on{border-color:var(--accent); background:var(--bg-2); box-shadow:0 0 0 2px var(--accent) inset}
   .emoji-btn.locked{opacity:.3; cursor:default}
   .emoji-btn.poor{opacity:.55}          /* 買得到，但魚不夠 */
+  .skin-btn{appearance:none; min-width:92px; padding:11px 13px; font:inherit; font-size:13px;
+            font-weight:700; cursor:pointer; border-radius:12px; border:1px solid var(--line);
+            background:var(--card); color:var(--ink); text-align:center}
+  .skin-btn.on{border-color:var(--accent); box-shadow:0 0 0 2px var(--accent) inset}
+  .skin-btn.locked{opacity:.35; cursor:default}
+  .skin-btn.poor{opacity:.55}
 
   /* 提示固定在標題列正下方。放在畫面底部會蓋住商店／信箱那排按鈕，
      放在這裡最多只擋到一行說明文字，而且面板打開時也不會擋到內容。 */
@@ -253,6 +283,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=0.4.0"></script>
+<script type="module" src="js/app.js?v=0.5.0"></script>
 </body>
 </html>

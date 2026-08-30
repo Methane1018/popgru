@@ -26,6 +26,12 @@ export const firebaseConfig = {
 //  （順序是刻意的：不寫更新內容就升不了版。）
 // ----------------------------------------------------------------------------
 export const CHANGELOG = [
+  { v:'0.5.0', date:'2026-08-31', notes:[
+    '加入外觀商店：背景、企鵝顏色、數字樣式，共 23 款',
+    '外觀是掛在格魯身上的，朋友來你家就會看到你的樣子',
+    '外觀跟帽子一樣買一次永久擁有，之後換來換去免費',
+    '修好重新整理之後連續天數變成 0 天',
+  ]},
   { v:'0.4.0', date:'2026-08-31', notes:[
     '加入版本號和這個更新紀錄，之後改了什麼都看得到',
     '帽子改成解鎖制：買一次就永久擁有，之後換來換去免費',
@@ -138,3 +144,52 @@ export const HATS = [
   { e:'💎', cost: 300, need: 1000000, name:'鑽石' },
 ];
 export const hatInfo = e => HATS.find(h => h.e === e) || { e, cost: 60, need: 0, name: '帽子' };
+
+// ----------------------------------------------------------------------------
+//  外觀。跟帽子一樣是買一次永久解鎖，之後換來換去免費。
+//  外觀存在「格魯」身上而不是帳號上，所以別人來拜訪就會看到你的樣子。
+//    cost 0 = 預設款，一開始就有
+//    need   = 小圈子總壓扁數要到多少才買得到
+// ----------------------------------------------------------------------------
+export const SKINS = {
+  bg: [
+    { id:'ice',    name:'冰原',     cost:  0, need:      0 },
+    { id:'sunset', name:'夕陽',     cost: 80, need:      0 },
+    { id:'mint',   name:'薄荷',     cost: 80, need:      0 },
+    { id:'grape',  name:'葡萄',     cost: 80, need:      0 },
+    { id:'night',  name:'深夜',     cost:120, need:      0 },
+    { id:'poop',   name:'便便雨',   cost:120, need:      0, emoji:'💩' },
+    { id:'fish',   name:'滿天小魚', cost:150, need:   1000, emoji:'🐟' },
+    { id:'star',   name:'星空',     cost:150, need:   5000, emoji:'⭐️' },
+    { id:'pizza',  name:'披薩雨',   cost:200, need:  25000, emoji:'🍕' },
+    { id:'crown',  name:'皇冠雨',   cost:300, need: 100000, emoji:'👑' },
+  ],
+  // 企鵝本體是灰的，所以先 sepia 再轉色相就能上色
+  tint: [
+    { id:'none',  name:'原色',       cost:  0, need:     0, filter:'' },
+    { id:'blue',  name:'藍企鵝',     cost:100, need:     0, filter:'sepia(1) hue-rotate(165deg) saturate(2.4)' },
+    { id:'pink',  name:'粉企鵝',     cost:100, need:     0, filter:'sepia(1) hue-rotate(290deg) saturate(2)' },
+    { id:'mint',  name:'薄荷企鵝',   cost:100, need:     0, filter:'sepia(1) hue-rotate(105deg) saturate(1.9)' },
+    { id:'ghost', name:'幽靈企鵝',   cost:180, need:  5000, filter:'grayscale(1) brightness(1.3) opacity(.6)' },
+    { id:'gold',  name:'金企鵝',     cost:250, need: 25000, filter:'sepia(1) saturate(3.2) brightness(1.08) contrast(1.05)' },
+    { id:'neon',  name:'霓虹企鵝',   cost:300, need:100000, filter:'sepia(1) hue-rotate(200deg) saturate(6) contrast(1.2)' },
+  ],
+  font: [
+    { id:'plain',  name:'預設',   cost:  0, need:     0 },
+    { id:'mono',   name:'等寬',   cost: 60, need:     0 },
+    { id:'shadow', name:'立體',   cost:120, need:     0 },
+    { id:'glow',   name:'發光',   cost:120, need:  5000 },
+    { id:'gold',   name:'燙金',   cost:200, need: 25000 },
+    { id:'rainbow',name:'彩虹',   cost:300, need:100000 },
+  ],
+};
+
+export const SKIN_KINDS = [
+  { k:'bg',   label:'背景' },
+  { k:'tint', label:'企鵝顏色' },
+  { k:'font', label:'數字樣式' },
+];
+export const skinInfo = (kind, id) =>
+  (SKINS[kind] || []).find(x => x.id === id) || (SKINS[kind] || [])[0];
+export const defaultSkin = () =>
+  ({ bg:SKINS.bg[0].id, tint:SKINS.tint[0].id, font:SKINS.font[0].id });

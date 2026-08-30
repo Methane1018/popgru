@@ -1,11 +1,12 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.4.0';
+import * as S from './store.js?v=0.5.0';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
-} from './config.js?v=0.4.0';
+  SKINS, SKIN_KINDS, skinInfo, defaultSkin,
+} from './config.js?v=0.5.0';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -45,6 +46,23 @@ function ago(t) {
   if (m < 1440) return `${Math.floor(m / 60)} 小時前`;
   const days = Math.floor(m / 1440);
   return days < 30 ? `${days} 天前` : `${Math.floor(days / 30)} 個月前`;
+}
+
+/* ------------------------------------------------------------------ 外觀 -- */
+// 表情符號背景直接用內嵌 SVG 平鋪，不需要任何圖檔
+const emojiTile = e => `url("data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72">` +
+  `<text x="36" y="47" font-size="26" text-anchor="middle" opacity="0.13">${e}</text></svg>`)}")`;
+
+// 套用外觀。參數是「正在看的那隻格魯」的外觀 —— 所以去別人家會看到他的樣子。
+function applySkin(skin) {
+  const sk = { ...defaultSkin(), ...(skin || {}) };
+  const b  = document.body;
+  const bg = skinInfo('bg', sk.bg);
+  b.dataset.bg = bg.id;
+  b.style.setProperty('--skin-tile', bg.emoji ? emojiTile(bg.emoji) : 'none');
+  b.style.setProperty('--skin-tint', skinInfo('tint', sk.tint).filter || 'none');
+  b.dataset.font = skinInfo('font', sk.font).id;
 }
 
 /* ------------------------------------------------------------------ 姿勢 -- */
@@ -238,6 +256,7 @@ function render() {
     : helpLeft > 0          ? `${v.ownerName} 的格魯 · 今天還能幫 ${nf(helpLeft)} 下`
                             : `${v.ownerName} 的格魯 · 今天幫忙的額度用完了`;
   document.body.classList.toggle('visiting', !v.isMine);
+  applySkin(v.skin);                      // 看誰家就套誰的外觀
   hatEl.textContent = v.hat || '';
   hatEl.hidden = !v.hat;
 
@@ -310,6 +329,52 @@ function renderPanel(name) {
      me: panelMe, changelog: panelChangelog })[name]?.(body);
 }
 
+/* --- 外觀 --- */
+function showSkinPicker() {
+  subView = true;
+  const body = $('sheetBody'); body.innerHTML = '';
+  $('sheetTitle').textContent = '外觀';
+  const st = S.state, cur = { ...defaultSkin(), ...(st.myGru.skin || {}) };
+
+  body.append(el('p', 'hint-sm',
+    `你有 🐟 ${nf(st.me.fish)}。解鎖一次就永久擁有，之後換來換去免費。` +
+    `外觀是掛在格魯身上的，朋友來你家就會看到。`));
+
+  for (const { k, label } of SKIN_KINDS) {
+    body.append(el('p', 'note', label));
+    const grid = el('div', 'grid');
+    for (const item of SKINS[k]) {
+      const owned  = S.ownsSkin(k, item.id);
+      const locked = S.skinLocked(k, item.id);
+      const on     = cur[k] === item.id;
+
+      const cell = el('div', 'hat-cell');
+      const b = el('button', 'skin-btn' + (on ? ' on' : '') + (locked ? ' locked' : ''));
+      b.append(el('span', 'skin-name', item.name));
+      b.title = item.name;
+      if (locked) {
+        b.disabled = true;
+        cell.append(b, el('span', 'hat-need', nf(item.need)));
+      } else if (owned) {
+        b.onclick = async () => {
+          try { await S.setSkin(k, item.id); toast(`換成「${item.name}」`); showSkinPicker(); }
+          catch (e) { toast(e.message); }
+        };
+        cell.append(b, el('span', 'hat-need', on ? '使用中' : '免費'));
+      } else {
+        if (st.me.fish < item.cost) b.classList.add('poor');
+        b.onclick = async () => {
+          try { await S.buySkin(k, item.id); toast(`解鎖「${item.name}」，已經換上`); showSkinPicker(); }
+          catch (e) { toast(e.message); }
+        };
+        cell.append(b, el('span', 'hat-need', `${item.cost} 🐟`));
+      }
+      grid.append(cell);
+    }
+    body.append(grid);
+  }
+}
+
 /* --- 更新內容 --- */
 function panelChangelog(body) {
   markVersionSeen();
@@ -370,6 +435,21 @@ function panelShop(body) {
   body.append(el('p', 'note', `你有 🐟 ${nf(me.fish)}${me.goldfish ? ` · 🥇 ${me.goldfish} 金魚` : ''}`));
   body.append(el('p', 'hint-sm',
     `🐟 魚壓一下得一條。🥇 金魚每 ${nf(TUNING.goldfishOdds)} 下才掉一次，只能用來買金牌送人。`));
+
+  // 外觀自己一列，因為它有三大類、價格也不只一種
+  {
+    const row = el('div', 'row');
+    row.append(el('div', 'row-av big', '🎨'));
+    const mid = el('div', 'row-mid');
+    mid.append(el('div', 'row-title', '外觀 · 40〜300 🐟'));
+    mid.append(el('div', 'row-sub', '背景、企鵝顏色、數字樣式。朋友來你家就會看到'));
+    row.append(mid);
+    const acts = el('div', 'row-acts');
+    const b = el('button', 'btn small', '看外觀');
+    b.onclick = showSkinPicker;
+    acts.append(b); row.append(acts);
+    body.append(row);
+  }
 
   for (const [key, item] of Object.entries(ITEMS)) {
     if (key === 'poke') continue;
@@ -637,9 +717,13 @@ function panelMe(body) {
   };
   body.append(save);
 
-  const hat = el('button', 'btn', '換帽子');
+  const row2 = el('div', 'row-acts');
+  const hat = el('button', 'btn', '🎩 換帽子');
   hat.onclick = showHatPicker;
-  body.append(hat);
+  const skin = el('button', 'btn', '🎨 換外觀');
+  skin.onclick = showSkinPicker;
+  row2.append(hat, skin);
+  body.append(row2);
 
   if (st.visits.length) {
     body.append(el('h3', 'sub-h', '來過我家的人'));
