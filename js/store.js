@@ -8,7 +8,7 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo,
-} from './config.js?v=10';
+} from './config.js?v=11';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -250,22 +250,36 @@ async function onSignedIn(user) {
   unsubUser?.();
   unsubUser = F.onSnapshot(userRef(uid), s => {
     const d = s.data() || {};
+    const first = !state.me.loaded;
+
+    // 這幾個欄位是用 increment() 寫的，或會被別人改動（收到魚、金牌、帽子），
+    // 伺服器永遠比本機正確，所以每次快照都照抄。
     Object.assign(state.me, {
-      lifetime:d.lifetime||0, fish:d.fish||0, goldfish:d.goldfish||0,
-      medals:d.medals||0, freezes:d.freezes||0, double:d.double||0,
+      lifetime:d.lifetime||0, fish:d.fish||0, goldfish:d.goldfish||0, medals:d.medals||0,
       // 舊制買過的帽子（只存在 grus.hat）視同已解鎖，不能讓人白花錢
       ownedHats: Array.from(new Set([
         ...(Array.isArray(d.ownedHats) ? d.ownedHats : []),
         ...(state.myGru.hat ? [state.myGru.hat] : []),
       ])),
-      streak:d.streak||0, bestStreak:d.bestStreak||0,
-      lastDay:d.lastDay||null, todayCount:d.todayCount||0,
-      helpToday:d.helpToday||0, helpDay:d.helpDay||null,
       nick: realName(d.nick),
       googleName: realName(d.googleName) || state.me.googleName,
       name: realName(d.nick) || realName(d.googleName) || state.me.googleName || NO_NAME,
       photo: d.photo || state.me.photo,
     });
+
+    // 下面這些是「絕對值」欄位，只有這台裝置在寫，而快照永遠比本機慢一拍。
+    // 每次都照抄回來的話，還沒寫出去的增量就會被洗掉 ——
+    // 症狀就是幫忙額度自己跳回 300、連續天數莫名歸零。
+    // 所以只在第一次載入時採用伺服器的值，之後以本機為準。
+    if (first) {
+      Object.assign(state.me, {
+        streak:d.streak||0, bestStreak:d.bestStreak||0,
+        lastDay:d.lastDay||null, todayCount:d.todayCount||0,
+        helpToday:d.helpToday||0, helpDay:d.helpDay||null,
+        freezes:d.freezes||0, double:d.double||0,
+      });
+      state.me.loaded = true;      // 有了這個，flush() 才會開始寫回這些欄位
+    }
     sync();
   }, e => console.warn('讀取個人資料失敗：', e));
 
