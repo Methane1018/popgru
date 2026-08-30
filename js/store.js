@@ -8,7 +8,7 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME,
-} from './config.js?v=5';
+} from './config.js?v=6';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -168,7 +168,8 @@ async function onSignedIn(user) {
   }
   state.gated = false;
   state.mode  = 'member';
-  Object.assign(state.me, { uid, name: user.displayName || '無名氏', photo: user.photoURL || null });
+  const gName = user.displayName || '無名氏';
+  Object.assign(state.me, { uid, googleName: gName, name: gName, photo: user.photoURL || null });
 
   const guest = loadGuest();
   try {
@@ -188,7 +189,12 @@ async function onSignedIn(user) {
       await F.setDoc(gruRef(uid),
         { ownerName: state.me.name, ownerPhoto: state.me.photo }, { merge: true });
     }
-  } catch (e) { console.warn('建立資料失敗：', e); }
+  } catch (e) {
+    // ReferenceError / TypeError 是程式寫錯，不是網路問題 —— 這種必須大聲叫，
+    // 否則會像 gName 那次一樣整段靜靜地不執行，沒有人發現。
+    if (e instanceof ReferenceError || e instanceof TypeError) console.error('程式錯誤：', e);
+    else console.warn('建立資料失敗：', e);
+  }
 
   const claimed = await claimGuestProgress(uid);
 
@@ -422,8 +428,8 @@ export async function setGruName(name) {
   if (state.viewing.isMine) state.viewing.name = n;
   sync();
   if (state.mode === 'member' && fb) {
-    try { await fb.F.setDoc(gruRef(state.me.uid), { name:n }, { merge:true }); }
-    catch (e) { console.warn('改名失敗：', e); }
+    fb.F.setDoc(gruRef(state.me.uid), { name:n }, { merge:true })
+      .catch(e => console.warn('改格魯名失敗：', e));
   } else { saveGuest(); }
 }
 
@@ -434,14 +440,12 @@ export async function setNick(n) {
   state.me.name = nick || state.me.googleName || '無名氏';
   sync();
   if (state.mode === 'member' && fb) {
-    try {
-      const { F } = fb;
-      const b = F.writeBatch(fb.db);
-      b.set(userRef(state.me.uid), { nick: nick || null, name: state.me.name }, { merge:true });
-      b.set(gruRef(state.me.uid),  { ownerName: state.me.name }, { merge:true });
-      await b.commit();
-      await loadRoster();
-    } catch (e) { console.warn('改暱稱失敗：', e); }
+    const { F } = fb;
+    const b = F.writeBatch(fb.db);
+    b.set(userRef(state.me.uid), { nick: nick || null, name: state.me.name }, { merge:true });
+    b.set(gruRef(state.me.uid),  { ownerName: state.me.name }, { merge:true });
+    // 不 await：Firestore 離線時會把寫入排隊，await 下去畫面就卡住了
+    b.commit().then(() => loadRoster()).catch(e => console.warn('改暱稱失敗：', e));
   } else { saveGuest(); }
 }
 

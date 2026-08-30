@@ -1,11 +1,11 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=5';
+import * as S from './store.js?v=6';
 import {
   TUNING, ITEMS, MILESTONES, HATS, SILLY_HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION,
-} from './config.js?v=5';
+} from './config.js?v=6';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -511,11 +511,24 @@ function panelMe(body) {
   const nickIn = el('input', 'input');
   nickIn.value = st.me.nick || '';
   nickIn.maxLength = 12;
-  nickIn.placeholder = st.me.googleName || '用 Google 帳號的名字';
+  nickIn.placeholder = st.me.googleName || '留空就用 Google 帳號的名字';
   body.append(nickIn);
-  body.append(el('p', 'hint-sm', st.mode === 'member'
-    ? '留空就用 Google 帳號的名字。大家在名單和信箱看到的就是這個。'
-    : '先取好放著，登入之後大家就會看到這個名字。'));
+
+  // 把「大家實際會看到的名字」直接寫出來，跟著輸入即時更新，
+  // 免得留空的人以為自己真的叫「無名氏」
+  const preview = el('p', 'hint-sm');
+  const paintPreview = () => {
+    const typed = nickIn.value.trim();
+    const shown = typed || st.me.googleName || '無名氏';
+    preview.textContent = typed
+      ? `大家會看到：${shown}`
+      : `留空 · 大家會看到你的 Google 名字：${shown}`;
+  };
+  nickIn.oninput = paintPreview;
+  paintPreview();
+  body.append(preview);
+  if (st.mode !== 'member')
+    body.append(el('p', 'hint-sm', '登入之後大家才看得到這個名字。'));
 
   // 格魯的名字
   body.append(el('p', 'note', '格魯的名字'));
