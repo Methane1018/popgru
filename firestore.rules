@@ -1,0 +1,100 @@
+rules_version = '2';
+
+// ============================================================================
+//  POPGRU 安全規則
+//  貼到 Firebase Console → Firestore Database → 規則 → 發布
+// ============================================================================
+//
+//  設計前提：這是朋友之間的小圈子遊戲，不是銀行。
+//  規則擋掉的是「災難級」的破壞（一次灌一億、砍掉別人的資料、亂改別人的魚），
+//  不是「有人多壓了幾下」。詳見 README 的〈作弊這件事〉。
+// ----------------------------------------------------------------------------
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isMe(uid)  { return signedIn() && request.auth.uid == uid; }
+
+    // 單次寫入最多能讓計數往上加多少。
+    // 前端每 8 秒批次送一次，正常玩家一次頂多幾百下，5000 已經很寬鬆了。
+    function bumpOk(field) {
+      return request.resource.data[field] is int
+          && request.resource.data[field] >= resource.data.get(field, 0)
+          && request.resource.data[field] - resource.data.get(field, 0) <= 5000;
+    }
+
+    // ---- 小圈子總數 -------------------------------------------------------
+    // 任何人都讀得到（沒登入的訪客也看得到數字，這是登入的誘因）
+    match /meta/global {
+      allow read:   if true;
+      allow create: if signedIn()
+                    && request.resource.data.squashes is int
+                    && request.resource.data.squashes <= 5000;
+      allow update: if signedIn() && bumpOk('squashes');
+      allow delete: if false;
+    }
+
+    // ---- 每個人的格魯 -----------------------------------------------------
+    match /grus/{uid} {
+      // 公開讀取，分享出去的 ?gru=... 連結才打得開
+      allow read: if true;
+
+      // 只有本人能開自己的格魯
+      allow create: if isMe(uid);
+
+      allow update: if isMe(uid)
+                    // 別人來拜訪時，只准動「壓扁數」和「最後被壓時間」，
+                    // 不能改名字、換帽子、動別的欄位
+                    || (signedIn()
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                             .hasOnly(['squashes', 'lastSquashedAt'])
+                        && bumpOk('squashes'));
+
+      allow delete: if isMe(uid);
+
+      // 誰來幫忙壓過的足跡：一個訪客一份，只有他自己寫得了
+      // create 和 update 必須分開寫：create 時 resource 是 null，
+      // 碰 resource.data 會直接報錯，整個批次跟著失敗
+      match /visits/{visitor} {
+        allow read:   if true;
+        allow create: if isMe(visitor)
+                      && request.resource.data.count is int
+                      && request.resource.data.count <= 5000;
+        allow update: if isMe(visitor)
+                      && request.resource.data.count is int
+                      && request.resource.data.count >= resource.data.get('count', 0)
+                      && request.resource.data.count - resource.data.get('count', 0) <= 5000;
+        allow delete: if false;
+      }
+    }
+
+    // ---- 個人資料 ---------------------------------------------------------
+    match /users/{uid} {
+      // 登入的人才看得到彼此（名單需要）
+      allow read:  if signedIn();
+      // 魚、金魚、連續天數這些只有本人動得了
+      allow write: if isMe(uid);
+
+      // ---- 信箱 ----
+      // 別人只能「投遞」，不能翻閱、不能刪、不能改
+      match /inbox/{msg} {
+        allow read:   if isMe(uid);
+        allow update: if isMe(uid);           // 標記已讀
+        allow delete: if isMe(uid);
+        allow create: if signedIn()
+                      && request.resource.data.from == request.auth.uid
+                      && request.resource.data.type is string
+                      && request.resource.data.read == false
+                      && (!('text' in request.resource.data)
+                          || (request.resource.data.text is string
+                              && request.resource.data.text.size() <= 60));
+      }
+    }
+
+    // 其他一律拒絕
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
