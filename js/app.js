@@ -1,11 +1,11 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=9';
+import * as S from './store.js?v=10';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION,
-} from './config.js?v=9';
+} from './config.js?v=10';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -16,6 +16,15 @@ const nf = n => (n || 0).toLocaleString('en-US');
 // 舊版可能把「無名氏」寫進別人的 ownerName，顯示時當成沒設定
 const who = (v, fallback = '某人') =>
   (v && v !== '無名氏') ? v : fallback;
+
+// 信箱和足跡存的是「寄出當下」的名字。對方改暱稱之後，那些舊紀錄就
+// 認不出是誰了，所以顯示時改用名單裡的現名，並把當時的名字附在後面。
+function senderName(uid, stored) {
+  const cur = who(S.state.roster.find(g => g.uid === uid)?.ownerName, null);
+  const old = who(stored, null);
+  return { now: cur || old || '某人',
+           then: (cur && old && cur !== old) ? old : null };
+}
 
 /* ------------------------------------------------------------- 時間格式 -- */
 const ms = t => !t ? 0 : (typeof t === 'number' ? t : (t.toMillis ? t.toMillis() : +new Date(t)));
@@ -530,8 +539,13 @@ function drawInbox(body) {
     const verb = { poke:'戳了你一下', note:'留了一句話', fish:'送你魚',
                    freeze:'送你凍結卡', hat:'扣了頂帽子在你頭上',
                    double:'送你雙倍魚', medal:'頒了金牌給你' }[m.type] || '送了東西';
-    mid.append(el('div', 'row-title', `${m.fromName || '某人'} ${verb}`));
-    mid.append(el('div', 'row-sub', [m.text ? `「${m.text}」` : '', ago(m.at)].filter(Boolean).join(' · ')));
+    const nm = senderName(m.from, m.fromName);
+    mid.append(el('div', 'row-title', `${nm.now} ${verb}`));
+    mid.append(el('div', 'row-sub', [
+      m.text ? `「${m.text}」` : '',
+      ago(m.at),
+      nm.then ? `當時叫 ${nm.then}` : '',
+    ].filter(Boolean).join(' · ')));
     row.append(mid);
 
     if (m.from && m.from !== st.me.uid) {          // 回禮永遠比主動送容易
@@ -606,8 +620,10 @@ function panelMe(body) {
       const row = el('div', 'row');
       row.append(el('div', 'row-av', '🐧'));
       const mid = el('div', 'row-mid');
-      mid.append(el('div', 'row-title', `${v.name || '某人'} 幫你壓了 ${nf(v.count)} 下`));
-      mid.append(el('div', 'row-sub', ago(v.at)));
+      const nm = senderName(v.uid, v.name);
+      mid.append(el('div', 'row-title', `${nm.now} 幫你壓了 ${nf(v.count)} 下`));
+      mid.append(el('div', 'row-sub',
+        [ago(v.at), nm.then ? `當時叫 ${nm.then}` : ''].filter(Boolean).join(' · ')));
       row.append(mid);
       body.append(row);
     }
@@ -617,11 +633,16 @@ function panelMe(body) {
 /* ------------------------------------------------------------------ 導覽 -- */
 $('navPeople').onclick = () => { showPanel('people'); S.loadRoster().then(() => refreshPanel('people')); };
 $('navShop').onclick   = () => { showPanel('shop'); S.loadRoster(); };
-$('navInbox').onclick  = () => { showPanel('inbox'); S.loadInbox().then(() => refreshPanel('inbox')); };
+$('navInbox').onclick  = () => {
+  showPanel('inbox');
+  // 也要名單才查得到寄件人現在的名字
+  Promise.all([S.loadInbox(), S.loadRoster()]).then(() => refreshPanel('inbox'));
+};
 $('gruName').onclick   = () => {
   if (!S.state.viewing.isMine) return;          // 在別人家不能改人家的名字
   showPanel('me');
-  if (S.state.mode === 'member') S.loadVisits().then(() => refreshPanel('me'));                               // 訪客也能取名，資料存在本機
+  if (S.state.mode === 'member')
+    Promise.all([S.loadVisits(), S.loadRoster()]).then(() => refreshPanel('me'));                               // 訪客也能取名，資料存在本機
 };
 $('navHome').onclick   = async () => {
   await S.goHome();
