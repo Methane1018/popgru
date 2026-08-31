@@ -8,7 +8,7 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
-} from './config.js?v=0.7.0';
+} from './config.js?v=0.7.1';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -260,6 +260,20 @@ function onSignedOut() {
   state.ready = true; sync();
 }
 
+// 格魯上的 ownerName 就是「別人在名單和信箱看到的名字」。
+// 它必須等於 state.me.name（暱稱優先，沒設才用 Google 名字），
+// 而暱稱要等個人資料的快照到了才知道 —— 所以只能在這裡對齊，不能在登入當下寫。
+function syncOwnerName() {
+  if (!fb || state.mode !== 'member' || !state.me.loaded) return;
+  if (!state.myGru.uid || !state.me.uid) return;
+  const want = state.me.name;
+  if (!want || want === NO_NAME || state.myGru.ownerName === want) return;
+  state.myGru.ownerName = want;
+  fb.F.setDoc(gruRef(state.me.uid), { ownerName: want }, { merge:true })
+    .then(() => console.log(`POPGRU 顯示名字對齊為「${want}」`))
+    .catch(e => console.warn('同步顯示名字失敗：', e));
+}
+
 /* -------------------------------------------------------------- sign in -- */
 let unsubUser = null, unsubGru = null;
 
@@ -291,9 +305,12 @@ async function onSignedIn(user) {
         createdAt: F.serverTimestamp(),
         lastSquashedAt: F.serverTimestamp(),            // 沒這個欄位就不會出現在名單裡
       });
-    } else {                                            // 之後只更新頭像和名字
-      await F.setDoc(gruRef(uid),
-        { ownerName: state.me.name, ownerPhoto: state.me.photo }, { merge: true });
+    } else {
+      // 只更新頭像。這裡「不能」寫 ownerName ——
+      // 個人資料的快照還沒到，state.me.name 還是 Google 名字，暱稱根本還沒讀進來，
+      // 寫下去等於每次登入／重整都把使用者的暱稱蓋掉。
+      // ownerName 改由 syncOwnerName() 在兩份資料都載入之後才對齊。
+      await F.setDoc(gruRef(uid), { ownerPhoto: state.me.photo }, { merge: true });
     }
   } catch (e) {
     // ReferenceError / TypeError 是程式寫錯，不是網路問題 —— 這種必須大聲叫，
@@ -372,6 +389,7 @@ async function onSignedIn(user) {
 
       flush();                     // 資料到齊，把等在門口的寫入放行
     }
+    syncOwnerName();                // 這時才知道暱稱，把名單上的名字補正
     sync();
   }, e => console.warn('讀取個人資料失敗：', e));
 
@@ -388,6 +406,7 @@ async function onSignedIn(user) {
       skin: { ...defaultSkin(), ...(d.skin || {}) },
     };
     if (state.viewing.isMine) state.viewing = { ...state.myGru };
+    syncOwnerName();                // 格魯後到的話，在這裡對齊
     sync();
   }, e => console.warn('讀取格魯失敗：', e));
 
@@ -704,6 +723,10 @@ export async function setNick(n) {
   const nick = realName(String(n || '').slice(0, 12));
   state.me.nick = nick;
   state.me.name = nick || state.me.googleName || NO_NAME;
+  // 本機也要立刻改，別等快照繞一圈回來 ——
+  // 否則畫面會慢半拍，syncOwnerName() 也會判斷成不一致而多寫一次
+  state.myGru.ownerName = state.me.name;
+  if (state.viewing.isMine) state.viewing.ownerName = state.me.name;
   sync();
   if (state.mode === 'member' && fb) {
     const { F } = fb;

@@ -66,6 +66,11 @@ const check = (name, ok, detail = '') => {
         /const targetUid = v\.isMine \? \(state\.me\.uid \|\| v\.uid\) : v\.uid;/.test(store));
   check('待送匣記的是同一個對象', /outboxAdd\(me\.uid, flushTarget,/.test(store));
   check('待送匣不收空對象', /if \(!uid \|\| !target\) return;/.test(store));
+  // 登入當下還不知道暱稱（個人資料快照未到），那時寫 ownerName 會把暱稱蓋掉
+  check('onSignedIn 不寫 ownerName',
+        !/setDoc\(gruRef\(uid\),\s*\{ ownerName/.test(store));
+  check('有 syncOwnerName 且載入後才對齊', /function syncOwnerName\(\)/.test(store)
+        && /!state\.me\.loaded\) return;[\s\S]{0,200}state\.myGru\.ownerName === want/.test(store));
   // 預覽時商店必須收起來，否則面板會把企鵝整個遮住，等於看不到預覽
   check('預覽會收起商店面板', /\$\('sheet'\)\.classList\.remove\('open'\);[\s\S]{0,200}previewVeil/.test(app));
   check('預覽罩點任何地方都能結束', /\$\('previewVeil'\)\.onclick = \(\) => exitPreview\(\)/.test(app));
