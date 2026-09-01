@@ -174,6 +174,25 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   }
 }
 
+// nav 的按鈕是「圖示 <i> ＋ 標籤 <em>」兩層。
+// 對它們直接寫 .textContent 會把兩個 span 一起洗掉，按鈕就只剩一個字，
+// 而且只有在「有未讀信」或「按了靜音」之後才看得到 —— 典型的靜默故障。
+{
+  const nav = (html.match(/<nav class="nav">(.*?)<\/nav>/s) || ['',''])[1];
+  const ids = [...nav.matchAll(/id="(\w+)"/g)].map(m => m[1]);
+  check('讀得到 nav 按鈕', ids.length > 0, String(ids.length));
+
+  const parts = nav.split(/(?=<button)/).filter(x => x.includes('<button'));
+  const noSpans = parts.filter(b => !/<i>/.test(b) || !/<em>/.test(b))
+                       .map(b => (b.match(/id="(\w+)"/) || [])[1]);
+  check('每個 nav 按鈕都有圖示與標籤', !noSpans.length, String(noSpans));
+
+  const clobbered = ids.filter(id =>
+    new RegExp(`\\$\\('${id}'\\)\\.textContent\\s*=`).test(app));
+  check('沒有人直接覆寫 nav 按鈕的 textContent', !clobbered.length,
+        `${clobbered} 會把圖示和標籤一起洗掉`);
+}
+
 // 每個 MIRROR_FIELDS 欄位都必須在 blankMe() 有預設值，也必須出現在 srv。
 // 少了預設值，舊裝置的鏡像就會缺那個鍵 → state.me 收到 undefined
 // → Firestore 整批拒絕 → 所有寫入停擺，而畫面上完全看不出來。

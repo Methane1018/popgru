@@ -1,14 +1,14 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.10.1';
+import * as S from './store.js?v=0.10.2';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
   TREASURES, RARITY, SOURCE_LABEL, treasureHow,
   SKILLS, AXES, SP_STEPS, skillPrereq,
-} from './config.js?v=0.10.1';
+} from './config.js?v=0.10.2';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -315,7 +315,9 @@ function render() {
     $('hint').textContent = '額度用完了，還是可以壓爽的，只是不計分';
 
   const unread = st.inbox.filter(m => !m.read).length;
-  $('navInbox').textContent = unread ? `📬 ${unread}` : '📭';
+  // 圖示和標籤分開放，直接寫 textContent 會把兩個 span 一起洗掉
+  $('navInbox').querySelector('i').textContent  = unread ? '📬' : '📭';
+  $('navInbox').querySelector('em').textContent = unread ? `${unread} 封` : '信箱';
   $('navInbox').classList.toggle('alert', unread > 0);
   $('navHome').hidden = v.isMine;
 
@@ -1133,10 +1135,10 @@ $('shareBtn').onclick = async () => {
 $('sound').onclick = () => {
   soundOn = !soundOn;
   try { localStorage.setItem('popgru.sound', soundOn ? '1' : '0'); } catch {}
-  $('sound').textContent = soundOn ? '🔊' : '🔇';
+  $('sound').querySelector('i').textContent = soundOn ? '🔊' : '🔇';
   $('sound').setAttribute('aria-pressed', String(soundOn));
 };
-$('sound').textContent = soundOn ? '🔊' : '🔇';
+$('sound').querySelector('i').textContent = soundOn ? '🔊' : '🔇';
 
 /* ------------------------------------------------------------------ 啟動 -- */
 S.on('state', render);

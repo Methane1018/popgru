@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.10.1';
+} from './config.js?v=0.10.2';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';

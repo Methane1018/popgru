@@ -159,7 +159,18 @@
   .stats.extra{font-size:12px; font-weight:700; color:var(--muted); gap:0; min-height:16px; margin-top:2px}
 
   /* ---------- 導覽 ---------- */
-  .nav{width:min(540px,100%); display:flex; gap:6px; justify-content:center; flex-wrap:wrap; margin-top:12px}
+  /* 一版加一顆，到 v0.10 已經八顆了。flex + wrap 會斷成參差的置中兩列，
+     很難看也很難按。改成網格：欄數自己適應寬度（窄螢幕 5 欄、寬螢幕一列排完），
+     每一格等寬，永遠不會有孤零零置中的那一行。 */
+  .nav{width:min(540px,100%); margin-top:12px;
+       display:grid; grid-template-columns:repeat(auto-fit,minmax(62px,1fr)); gap:6px}
+  .nav .btn{display:flex; flex-direction:column; align-items:center; gap:3px;
+            padding:7px 2px; border-radius:12px; min-width:0}
+  .nav .btn i{font-style:normal; font-size:17px; line-height:1.1}
+  .nav .btn em{font-style:normal; font-size:10.5px; font-weight:700; letter-spacing:.02em;
+               line-height:1.1; white-space:nowrap}
+  .nav .btn.alert i{animation:navpulse 1.4s ease-in-out infinite}
+  @keyframes navpulse{50%{transform:scale(1.18)}}
   .btn{appearance:none; border:1px solid var(--line); background:var(--card); color:var(--ink);
        font:inherit; font-size:13px; font-weight:700; padding:8px 13px; border-radius:999px;
        cursor:pointer; line-height:1; white-space:nowrap}
@@ -369,15 +380,15 @@
 </main>
 
 <nav class="nav">
-  <button class="btn" id="navHome" type="button" hidden>🏠 回家</button>
-  <button class="btn" id="navPeople" type="button">👥 大家</button>
-  <button class="btn" id="navItems" type="button">🎁 道具</button>
-  <button class="btn" id="navWardrobe" type="button">🎨 裝扮</button>
-  <button class="btn" id="navCodex" type="button">📖 圖鑑</button>
-  <button class="btn" id="navSkills" type="button">🌳 技能</button>
-  <button class="btn" id="navInbox" type="button">📭</button>
-  <button class="btn" id="shareBtn" type="button" hidden>🔗 分享</button>
-  <button class="btn" id="sound" type="button" aria-pressed="true">🔊</button>
+  <button class="btn" id="navHome" type="button" hidden><i>🏠</i><em>回家</em></button>
+  <button class="btn" id="navPeople" type="button"><i>👥</i><em>大家</em></button>
+  <button class="btn" id="navItems" type="button"><i>🎁</i><em>道具</em></button>
+  <button class="btn" id="navWardrobe" type="button"><i>🎨</i><em>裝扮</em></button>
+  <button class="btn" id="navCodex" type="button"><i>📖</i><em>圖鑑</em></button>
+  <button class="btn" id="navSkills" type="button"><i>🌳</i><em>技能</em></button>
+  <button class="btn" id="navInbox" type="button"><i>📭</i><em>信箱</em></button>
+  <button class="btn" id="shareBtn" type="button" hidden><i>🔗</i><em>分享</em></button>
+  <button class="btn" id="sound" type="button" aria-pressed="true"><i>🔊</i><em>音效</em></button>
 </nav>
 
 <div class="scrim" id="scrim"></div>
@@ -400,6 +411,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=0.10.1"></script>
+<script type="module" src="js/app.js?v=0.10.2"></script>
 </body>
 </html>
