@@ -174,6 +174,30 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   }
 }
 
+// 每個 MIRROR_FIELDS 欄位都必須在 blankMe() 有預設值，也必須出現在 srv。
+// 少了預設值，舊裝置的鏡像就會缺那個鍵 → state.me 收到 undefined
+// → Firestore 整批拒絕 → 所有寫入停擺，而畫面上完全看不出來。
+// （v0.10.0 的 magicDay 就是這樣把所有人的寫入卡住的。）
+{
+  const mf = ((store.match(/const MIRROR_FIELDS = \[(.*?)\];/s) || ['',''])[1]
+              .match(/'(\w+)'/g) || []).map(x => x.replace(/'/g, ''));
+  const blank = (store.match(/const blankMe = \(\) => \(\{(.*?)\}\);/s) || ['',''])[1];
+  const srv   = (store.match(/const srv = \{(.*?)\};/s) || ['',''])[1];
+
+  check('讀得到 MIRROR_FIELDS', mf.length > 0, String(mf.length));
+  const noDefault = mf.filter(f => !new RegExp('\\b' + f + '\\s*:').test(blank));
+  check('鏡像欄位都在 blankMe 有預設值', !noDefault.length, String(noDefault));
+  const noSrv = mf.filter(f => !new RegExp('\\b' + f + '\\s*:').test(srv));
+  check('鏡像欄位都在 srv 有對應', !noSrv.length, String(noSrv));
+
+  // 挑選鏡像欄位時一定要擋 undefined，不能直接 mir[f]
+  check('pickMirror 有擋 undefined',
+        /export function pickMirror/.test(store) && /=== undefined/.test(store));
+  // flush 的保險絲：寫出去之前把 undefined 清掉
+  check('flush 寫出前會清掉 undefined',
+        /是 undefined，這次先跳過它/.test(store));
+}
+
 // ── 技能樹 ──────────────────────────────────────────────────────────────
 {
   const block = (cfg.match(/export const SKILLS = \[(.*?)\n\];/s) || ['',''])[1];

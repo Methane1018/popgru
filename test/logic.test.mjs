@@ -288,5 +288,41 @@ ok('★ 亂數在上限時完全不掉寶', dropped.length === 0, dropped.join('
 
 S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
 
+/* ------------------------------------------- 舊鏡像缺欄位（v0.10.1 的 bug） -- */
+// 真實災情：v0.9 寫下的鏡像沒有 magicDay，第一次快照把 undefined 塞進 state.me，
+// Firestore 收到 undefined 就整批拒絕 —— 連續九次寫入全部失敗，
+// 使用者只看得到主控台在噴，畫面一切正常。
+{
+  const srv = {
+    streak:5, bestStreak:9, lastDay:'2026-09-02', todayCount:3,
+    helpToday:10, helpDay:'2026-09-02', freezes:1, double:0, magicDay:null,
+  };
+  // 舊版本的鏡像：magicDay 這個鍵根本不存在
+  const oldMir = {
+    streak:7, bestStreak:9, lastDay:'2026-09-02', todayCount:4,
+    helpToday:12, helpDay:'2026-09-02', freezes:1, double:0,
+  };
+
+  const picked = S.pickMirror(oldMir, srv, true);
+  const undef = Object.entries(picked).filter(([, v]) => v === undefined).map(([k]) => k);
+  ok('★ 舊鏡像缺欄位時不會產生 undefined', !undef.length, undef.join(','));
+  ok('★ 缺的欄位退回伺服器值', picked.magicDay === null, String(picked.magicDay));
+  ok('鏡像有的欄位仍然以鏡像為準', picked.streak === 7, String(picked.streak));
+
+  const fromSrv = S.pickMirror(oldMir, srv, false);
+  ok('不採用鏡像時全部取伺服器值', fromSrv.streak === 5, String(fromSrv.streak));
+
+  // 完全沒有鏡像（新裝置）也不能炸
+  const noMir = S.pickMirror(null, srv, true);
+  ok('★ 完全沒有鏡像也不會產生 undefined',
+     !Object.values(noMir).some(v => v === undefined), JSON.stringify(noMir));
+
+  // 未來再加新欄位時，這條會直接抓到
+  const futureSrv = { ...srv };
+  const everyField = S.pickMirror({}, futureSrv, true);
+  ok('★ 空鏡像時每個欄位都有值',
+     !Object.values(everyField).some(v => v === undefined), JSON.stringify(everyField));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

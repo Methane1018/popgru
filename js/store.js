@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.10.0';
+} from './config.js?v=0.10.1';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -207,6 +207,25 @@ function prefillFromMirror() {
   return true;
 }
 
+// 從鏡像和伺服器值裡挑出要用的「絕對值」欄位。
+//
+// 鏡像可能是舊版本寫下的，缺了後來才新增的欄位（magicDay 就是這樣中的）。
+// 那時候一定要退回伺服器值 —— 絕對不能讓 undefined 流進 state.me：
+// Firestore 收到 undefined 會**整批拒絕**，於是連點擊都送不出去，
+// 而畫面上完全看不出來，只有主控台在噴。
+//
+// 這是「新增一個 MIRROR_FIELDS 欄位」時必然會踩到的坑，跟欄位是什麼無關，
+// 所以修在這裡而不是修 magicDay。
+export function pickMirror(mir, srv, useMirror) {
+  const out = {};
+  for (const f of MIRROR_FIELDS) {
+    const a = useMirror ? (mir ? mir[f] : undefined) : srv[f];
+    const v = a === undefined ? srv[f] : a;
+    out[f] = v === undefined ? null : v;
+  }
+  return out;
+}
+
 function mirrorRead(uid) {
   try {
     const o = JSON.parse(localStorage.getItem(MIRROR_KEY) || 'null');
@@ -386,9 +405,7 @@ async function onSignedIn(user) {
       // 'YYYY-MM-DD' 直接字串比大小就等於比日期。
       const mir = mirrorRead(uid);
       const useMirror = !!mir && (mir.lastDay || '') >= (srv.lastDay || '');
-      const pickd = {};
-      for (const f of MIRROR_FIELDS) pickd[f] = useMirror ? mir[f] : srv[f];
-      Object.assign(state.me, pickd);
+      Object.assign(state.me, pickMirror(mir, srv, useMirror));
       state.me.loaded = true;      // 有了這個，flush() 才會開始寫
       repairStreak();
       checkAchievements();          // 上線當下大家會一次達成好幾個，呼叫端要合併通知
@@ -664,6 +681,16 @@ export async function flush() {
       freezes: me.freezes, double: me.double, magicDay: me.magicDay,
       ...(patch || {}),
     };
+    // 保險絲：只要有一個欄位是 undefined，Firestore 就會拒絕整批寫入，
+    // 連帶所有累積的點擊都送不出去。寧可少寫一個欄位也不要全部停擺 ——
+    // 但一定要吼出來，這種情況永遠是 bug。
+    for (const k of Object.keys(p)) {
+      if (p[k] === undefined) {
+        console.error(`POPGRU 欄位 ${k} 是 undefined，這次先跳過它（這是 bug）`);
+        delete p[k];
+      }
+    }
+
     if (n)    p.lifetime = F.increment(n);
     if (fish) p.fish     = F.increment(fish);
     if (gold) p.goldfish = F.increment(gold);

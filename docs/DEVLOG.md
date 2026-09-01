@@ -109,6 +109,32 @@ v0.8 重構商店時，我用「從 `function showHatPicker` 刪到下一個 `/*
 
 兩條都實際驗證過抓得到：把 `grants('autopress')` 改掉，第一條立刻紅。
 
+## 10. 新增一個鏡像欄位，把所有人的寫入卡死
+
+v0.10.0 在 `MIRROR_FIELDS` 加了 `magicDay`。舊裝置的 localStorage 鏡像是 v0.9 寫的，
+**沒有那個鍵**，於是第一次快照時：
+
+    pickd[f] = useMirror ? mir[f] : srv[f];   // mir.magicDay === undefined
+
+`undefined` 被塞進 `state.me`，接著 `flush()` 把它寫進批次 ——
+**Firestore 收到 undefined 會拒絕整批寫入**，不是跳過那個欄位。
+
+結果：連點擊都送不出去，連續九次寫入全部失敗。而畫面上一切正常，
+只有主控台在噴。（幸好 v0.9 那次災難之後把寫入失敗改成 `console.error`，
+不然這次又是無聲的。）
+
+修的不是 `magicDay`，是那一行：抽成 `pickMirror()`，鏡像缺鍵就退回伺服器值。
+這個坑跟欄位是什麼無關，**只要以後再加一個 MIRROR_FIELDS 欄位就會再踩一次**。
+
+另外加了一道保險絲：`flush()` 寫出去之前把值為 `undefined` 的欄位刪掉並 `console.error`。
+寧可少寫一個欄位，也不要因為一個欄位讓所有點擊都停擺。
+
+三條 `check.mjs` 規則：鏡像欄位都要在 `blankMe()` 有預設值、都要出現在 `srv`、
+`pickMirror` 要擋 undefined。已驗證第一條抓得到（把預設值刪掉就紅）。
+
+- 教訓：**Firestore 的 undefined 是整批失敗，不是局部失敗**
+- 教訓：新增一個「會被鏡像的欄位」是一個跨版本相容性問題，不是加一行
+
 ---
 
 ## 資料庫用量
