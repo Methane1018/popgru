@@ -107,6 +107,16 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   }
 }
 
+// 3b) 面板／子畫面函式不能被呼叫卻沒有定義。
+//     v0.8 刪 showHatPicker 時連著把 showGivePicker 一起刪掉，
+//     「送人」整整壞了兩個版本沒人發現 —— 按下去只是靜靜地丟 ReferenceError。
+{
+  const defined = new Set([...app.matchAll(/function (\w+)\s*\(/g)].map(m => m[1]));
+  const used = new Set([...app.matchAll(/\b((?:show|panel|draw)[A-Z]\w*)\s*\(/g)].map(m => m[1]));
+  const missing = [...used].filter(n => !defined.has(n));
+  check('沒有呼叫不存在的面板函式', !missing.length, String(missing));
+}
+
 // 4) app.js 取用的每個 DOM id，index.html 都要有
 {
   const have = new Set([...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]));

@@ -1,13 +1,13 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.9.2';
+import * as S from './store.js?v=0.9.3';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
   TREASURES, RARITY, SOURCE_LABEL, treasureHow,
-} from './config.js?v=0.9.2';
+} from './config.js?v=0.9.3';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -529,6 +529,90 @@ function panelWardrobe(body) {
   body.append(bar);
 }
 
+
+/* --- 送人 --- */
+// 從道具列的「送人」進來。挑對象、（帽子）挑款式、（紙條）打字，然後送出。
+function showGivePicker(key, retried) {
+  subView = true;
+  const item = ITEMS[key], st = S.state;
+  const body = $('sheetBody'); body.innerHTML = '';
+  $('sheetTitle').textContent = `送 ${item.emoji} ${item.name} 給誰`;
+
+  let hat = null, note = '';
+
+  if (item.hat) {
+    // 只能送沒有門檻的帽子，不然等於幫人跳過里程碑
+    const pool = SKINS.hat.filter(h => h.id !== 'none' && h.need === 0);
+    hat = pool[0].id;
+    body.append(el('p', 'note', '選一頂扣在對方頭上'));
+    body.append(el('p', 'hint-sm', '對方會直接戴上，而且永久解鎖，之後想換回來不用付錢。'));
+    const grid = el('div', 'grid');
+    pool.forEach((h, i) => {
+      const cell = el('div', 'hat-cell');
+      const b = el('button', 'emoji-btn' + (i === 0 ? ' on' : ''), h.id);
+      b.onclick = () => {
+        hat = h.id;
+        grid.querySelectorAll('.emoji-btn').forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+      };
+      cell.append(b, el('span', 'cell-name', h.name));
+      grid.append(cell);
+    });
+    body.append(grid);
+  }
+
+  if (item.text) {
+    const inp = el('input', 'input');
+    inp.maxLength = TUNING.noteMaxLen;
+    inp.placeholder = `想說什麼？${TUNING.noteMaxLen} 字以內`;
+    inp.oninput = () => { note = inp.value; };
+    body.append(inp);
+  }
+
+  const price = S.itemCost(key), unit = item.gold ? ' 🥇' : ' 🐟';
+  if (price > 0) body.append(el('p', 'hint-sm', `送出要 ${price}${unit}`));
+
+  const list = st.roster.filter(g => g.uid !== st.me.uid);
+  if (!list.length) {
+    if (!retried) {                       // 名單可能還沒抓過，抓一次再畫
+      body.append(el('p', 'empty', '載入名單中…'));
+      S.loadRoster(true).then(() => { if (openPanel === 'items') showGivePicker(key, true); });
+    } else {
+      body.append(el('p', 'empty', '還沒有其他人可以送。等朋友登入之後就會出現。'));
+    }
+    return;
+  }
+
+  body.append(el('p', 'note', '送給'));
+  for (const g of list) {
+    const row = el('div', 'row');
+    const av = el('div', 'row-av');
+    if (g.ownerPhoto) { const i = new Image(); i.src = g.ownerPhoto; i.alt = ''; av.append(i); }
+    else av.textContent = '🐧';
+    row.append(av);
+    const mid = el('div', 'row-mid');
+    mid.append(el('div', 'row-title', who(g.ownerName)));
+    mid.append(el('div', 'row-sub', g.name || DEFAULT_GRU_NAME));
+    row.append(mid);
+
+    const b = el('button', 'btn small primary', '送出');
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const extra = {};
+        if (item.hat)  extra.hat  = hat;
+        if (item.text) extra.text = note.slice(0, TUNING.noteMaxLen);
+        await S.sendItem(g.uid, key, extra);
+        toast(`送出 ${item.emoji} 給 ${who(g.ownerName)}`);
+        closePanel();
+      } catch (e) { toast(e.message); b.disabled = false; }
+    };
+    const acts = el('div', 'row-acts');
+    acts.append(b);
+    row.append(acts);
+    body.append(row);
+  }
+}
 
 /* --- 圖鑑 --- */
 let dexFilter = 'all', dexDetail = null;
