@@ -108,6 +108,8 @@
   .bar-track{height:5px; border-radius:99px; background:var(--line); overflow:hidden}
   .bar-fill{height:100%; background:var(--accent); border-radius:99px}
   .bar-text{font-size:11px; color:var(--muted); text-align:center; margin-top:5px; font-weight:600}
+  .bar.gold{margin-top:8px}
+  .bar.gold .bar-fill{background:linear-gradient(90deg,#d8a020,#f0c45a)}
 
   .gru-head{display:flex; align-items:baseline; gap:8px; margin-top:14px}
   .gru-name{appearance:none; background:none; border:0; font:inherit; color:var(--ink);
@@ -249,6 +251,10 @@
           font-variant-numeric:tabular-nums}
   .qty-in:focus{outline:2px solid var(--accent); outline-offset:1px}
   .qty-total{font-size:14px; font-weight:800; margin:0 4px 10px}
+  .sp-buy{display:flex; align-items:center; justify-content:space-between; gap:8px;
+          flex-wrap:wrap; margin:2px 2px 10px; padding:9px 11px; border-radius:12px;
+          border:1px dashed var(--line); background:var(--bg-2)}
+  .sp-buy-note{font-size:12.5px; font-weight:700; color:var(--muted)}
   .dex-name{font-size:12px; font-weight:800; line-height:1.25}
   .dex-cell.locked .dex-name{color:var(--muted); font-weight:700}
   .dex-sub{font-size:10.5px; color:var(--muted); line-height:1.4}
@@ -373,6 +379,11 @@
     <div class="bar-text" id="barText"></div>
   </div>
 
+  <div class="bar gold" id="goldBar" hidden>
+    <div class="bar-track"><div class="bar-fill" id="goldFill"></div></div>
+    <div class="bar-text" id="goldText"></div>
+  </div>
+
   <div class="gru-head">
     <button class="gru-name" id="gruName" title="幫格魯取名 / 看誰來過">格魯</button>
     <span class="gru-count" id="gruCount">0 下</span>
@@ -432,6 +443,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=0.10.3"></script>
+<script type="module" src="js/app.js?v=0.10.4"></script>
 </body>
 </html>

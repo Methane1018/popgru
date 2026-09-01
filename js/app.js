@@ -1,14 +1,14 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.10.3';
+import * as S from './store.js?v=0.10.4';
 import {
   TUNING, ITEMS, MILESTONES, HATS, clampQty,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
   TREASURES, RARITY, SOURCE_LABEL, treasureHow,
   SKILLS, AXES, SP_STEPS, skillPrereq,
-} from './config.js?v=0.10.3';
+} from './config.js?v=0.10.4';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -278,6 +278,15 @@ function render() {
     $('barText').textContent = `距離「${next.label}」還有 ${nf(next.at - shown)} 下 · 解鎖 ${next.unlock}`;
     $('bar').hidden = false;
   } else { $('bar').hidden = true; }
+
+  // 下一條金魚。金魚是收集寶物唯一的貨幣，看不到進度就只是「偶爾會掉」。
+  const gOdds = S.goldfishOdds();
+  // 不能取整數：門檻 350 的時候壓一下只有 0.28%，取整就永遠是 0，
+  // 看起來像進度條壞掉
+  $('goldFill').style.width = (S.goldfishProgress() * 100).toFixed(2) + '%';
+  $('goldText').textContent =
+    `距離下一條 🥇 金魚還有 ${nf(Math.max(0, gOdds - (st.me.goldTick || 0)))} 下`;
+  $('goldBar').hidden = false;
 
   // --- 格魯 ---
   $('gruName').textContent  = v.name || DEFAULT_GRU_NAME;
@@ -875,7 +884,20 @@ function panelSkills(body) {
   const nx = nextSpAt();
   body.append(el('p', 'note', nx
     ? `再壓 ${nf(nx - (S.state.me.lifetime || 0))} 下拿到下一點`
-    : '技能點已經全部拿到了'));
+    : '壓出來的技能點已經全部拿到了'));
+
+  // 後期加速。門檻和里程碑給的點數是固定的，越到後面越慢，
+  // 所以要有一個「一直都能推進」的來源 —— 而金魚在買完圖鑑那三個寶物之後
+  // 本來就沒用途了，剛好接起來。
+  const per = TUNING.goldPerSkillPoint, gf = S.state.me.goldfish || 0;
+  const box = el('div', 'sp-buy');
+  box.append(el('span', 'sp-buy-note', `🥇 ${nf(gf)} 金魚　·　${per} 條換 1 點`));
+  const swap = el('button', 'btn small primary', '換技能點');
+  swap.disabled = gf < per;
+  if (gf < per) swap.title = `還差 ${per - gf} 條金魚`;
+  swap.onclick = () => showSpBuy();
+  box.append(swap);
+  body.append(box);
 
   for (const [key, ax] of Object.entries(AXES)) {
     const wrap = el('div', 'sk-axis');
@@ -911,6 +933,43 @@ function panelSkills(body) {
   }
 
   body.append(el('p', 'note', '學會之後不能重來。要走哪條路是一個真的選擇。'));
+}
+
+// 金魚換技能點。跟商店一樣先選數量再確認。
+function showSpBuy() {
+  subView = true;
+  const body = $('sheetBody'); body.innerHTML = '';
+  $('sheetTitle').textContent = '用金魚換技能點';
+
+  const back = el('button', 'btn', '← 回技能');
+  back.onclick = () => { subView = false; renderPanel('skills'); };
+  body.append(back);
+
+  const per = TUNING.goldPerSkillPoint, gf = S.state.me.goldfish || 0;
+  body.append(el('p', 'note', `你有 🥇 ${nf(gf)} 金魚　·　${per} 條換 1 點`));
+  body.append(el('p', 'hint-sm',
+    '壓出來的技能點越到後面越慢，這是後期唯一能一直推進的來源。' +
+    '金魚每壓一段就會掉一條，🪨 重壓、🔮 水晶球、🌠 極光 都會讓它更常掉。'));
+
+  if (gf < per) { body.append(el('p', 'empty', `還差 ${per - gf} 條金魚。`)); return; }
+
+  const max = clampQty(Math.floor(gf / per));
+  const total = el('p', 'qty-total');
+  const buy = el('button', 'btn primary', '');
+  const q = qtyPicker(max, n => {
+    total.textContent = `花 ${nf(per * n)} 🥇 換 ${n} 點`;
+    buy.textContent = `確定換 ${n} 點`;
+  });
+  body.append(el('p', 'note', '要換幾點？'), q.node, total);
+  buy.onclick = () => {
+    buy.disabled = true;
+    try {
+      const n = S.buySkillPoint(q.get());
+      toast(`換到 ${n} 點技能點`);
+      subView = false; renderPanel('skills');
+    } catch (e) { toast(e.message); buy.disabled = false; }
+  };
+  body.append(buy);
 }
 
 function skillDetailView(body, sk) {

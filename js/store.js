@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.10.3';
+} from './config.js?v=0.10.4';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -63,7 +63,7 @@ const blankMe = () => ({
   ownedHats:[], ownedSkins:[], loaded:false,
   treasures:[], skills:[], helped:{}, giftsReceived:0,
   streak:0, bestStreak:0, lastDay:null, todayCount:0, helpToday:0, helpDay:null,
-  magicDay:null,
+  magicDay:null, goldTick:0, spBought:0,
 });
 const blankGru = () => ({
   uid:null, name:DEFAULT_GRU_NAME, ownerName:null, ownerPhoto:null,
@@ -112,7 +112,7 @@ function saveGuest() {
     localStorage.setItem(GUEST_KEY, JSON.stringify({
       lifetime, fish, goldfish, streak, bestStreak, lastDay, todayCount, nick, ownedHats,
       ownedSkins: state.me.ownedSkins,
-      treasures: state.me.treasures, skills: state.me.skills,
+      treasures: state.me.treasures, skills: state.me.skills, spBought: state.me.spBought,
       gruName: state.myGru.name, gruHat: state.myGru.hat, gruSquashes: state.myGru.squashes,
       gruSkin: state.myGru.skin,
     }));
@@ -129,6 +129,7 @@ function applyGuest() {
     ownedSkins: Array.isArray(g.ownedSkins) ? g.ownedSkins : [],
     treasures: Array.isArray(g.treasures) ? g.treasures : [],
     skills:    Array.isArray(g.skills)    ? g.skills    : [],
+    spBought:  g.spBought || 0,
   });
   Object.assign(state.myGru, blankGru(), {
     name:g.gruName||DEFAULT_GRU_NAME, hat:g.gruHat||null, squashes:g.gruSquashes||0,
@@ -184,7 +185,7 @@ function outboxSettle(uid, target, n, fish, gold) {
 // 這樣就算伺服器那邊完全沒寫進去，重整也不會掉。
 // 前段是「絕對值」欄位（只有這台裝置在寫，遺失就回不來）；
 // 後段是顯示用的數字，載入時先拿來墊著，免得畫面閃一下 0 再跳回真值。
-const MIRROR_FIELDS = ['streak','bestStreak','lastDay','todayCount','helpToday','helpDay','freezes','double','magicDay'];
+const MIRROR_FIELDS = ['streak','bestStreak','lastDay','todayCount','helpToday','helpDay','freezes','double','magicDay','goldTick'];
 const MIRROR_DISPLAY = ['lifetime','fish','goldfish','medals','treasures','skills'];
 const MIRROR_ALL = [...MIRROR_FIELDS, ...MIRROR_DISPLAY];
 
@@ -392,6 +393,8 @@ async function onSignedIn(user) {
       // 畫面上就是「點過的技能又變成可以點」。
       treasures: mergeOwned(state.me.treasures, d.treasures),
       skills:    mergeOwned(state.me.skills,    d.skills),
+      // 換來的點數只有本人會加，取大的那邊就不會被慢一拍的快照拉回去
+      spBought:  Math.max(state.me.spBought || 0, d.spBought || 0),
       helped: (d.helped && typeof d.helped === 'object') ? d.helped : {},
       giftsReceived: d.giftsReceived || 0,
       nick: realName(d.nick),
@@ -410,7 +413,7 @@ async function onSignedIn(user) {
         lastDay:d.lastDay||null, todayCount:d.todayCount||0,
         helpToday:d.helpToday||0, helpDay:d.helpDay||null,
         freezes:d.freezes||0, double:d.double||0,
-        magicDay:d.magicDay||null,
+        magicDay:d.magicDay||null, goldTick:d.goldTick||0,
       };
       // 本機鏡像只要「不比伺服器舊」就以本機為準。
       // 'YYYY-MM-DD' 直接字串比大小就等於比日期。
@@ -552,7 +555,7 @@ export async function goHome() {
 }
 
 /* --------------------------------------------------------------- squash -- */
-let squashTicks = 0, flushTarget = null;
+let flushTarget = null;
 // 裝扮增益是百分比，但魚是整數。零頭先累積著，湊滿一條才發，
 // 這樣不會出現 0.5 條魚，長期下來比例也是對的。
 let fishFrac = 0;
@@ -604,9 +607,11 @@ export function squash() {
   me.fish += r.gained;
 
   // 🔮 水晶球、🕛 準時 會讓金魚更容易掉
-  const goldOdds = Math.max(1, Math.round(TUNING.goldfishOdds * (1 - buffOf('gold'))));
-  squashTicks += 1;
-  if (squashTicks % goldOdds === 0) { r.goldfish = true; me.goldfish += 1; }
+  // 進度存在 me.goldTick 而不是模組變數，這樣重整之後不會從頭算起 ——
+  // 否則畫面上的進度條每次開頁都會歸零，看起來像倒退。
+  const goldOdds = goldfishOdds();
+  me.goldTick = (me.goldTick || 0) + 1;
+  if (me.goldTick >= goldOdds) { me.goldTick = 0; r.goldfish = true; me.goldfish += 1; }
 
   const drop = rollTreasure();                       // 寶物掉落
   if (drop && unlockTreasure(drop.id)) r.treasure = drop;
@@ -690,6 +695,7 @@ export async function flush() {
       streak: me.streak, bestStreak: me.bestStreak, lastDay: me.lastDay,
       todayCount: me.todayCount, helpToday: me.helpToday, helpDay: me.helpDay,
       freezes: me.freezes, double: me.double, magicDay: me.magicDay,
+      goldTick: me.goldTick,
       ...(patch || {}),
     };
     // 保險絲：只要有一個欄位是 undefined，Firestore 就會拒絕整批寫入，
@@ -701,6 +707,14 @@ export async function flush() {
         delete p[k];
       }
     }
+
+    // 持有清單每次都整份 union 回去，不倚賴那一筆 patch 活到寫入成功為止。
+    // 之前是「學會時排一筆 arrayUnion」，但 pendPatch 不在待送匣裡：
+    // 只要遇到一次寫入失敗又剛好關了頁面，那筆就永遠消失，
+    // 伺服器上沒有那個技能 —— 重整之後就又變成可以學。
+    // 整份 union 是冪等的，成本也只有幾個字串，所以每次都送。
+    if (me.skills?.length)    p.skills    = F.arrayUnion(...me.skills);
+    if (me.treasures?.length) p.treasures = F.arrayUnion(...me.treasures);
 
     if (n)    p.lifetime = F.increment(n);
     if (fish) p.fish     = F.increment(fish);
@@ -906,6 +920,13 @@ export function buffOf(kind) {
 
 export const helpedCount = () => Object.keys(state.me.helped || {}).length;
 
+// 下一條金魚要幾下（🔮 水晶球、🌠 極光、🕛 準時、🪨 重壓 都會讓它變少）
+export const goldfishOdds = () =>
+  Math.max(1, Math.round(TUNING.goldfishOdds * (1 - buffOf('gold'))));
+// 距離下一條金魚的進度 0～1
+export const goldfishProgress = () =>
+  Math.min(1, (state.me.goldTick || 0) / goldfishOdds());
+
 /* --------------------------------------------------------------- 技能樹 -- */
 // 技能點總數完全由 lifetime 推導出來，資料庫只存「學會了哪些」。
 // 算得出來的東西就不要儲存 —— 沒有計數器，就沒有被快照覆蓋而回滾的機會。
@@ -913,7 +934,8 @@ export const helpedCount = () => Object.keys(state.me.helped || {}).length;
 export const spTotal = () => {
   const n = state.me.lifetime || 0;
   return SP_STEPS.filter(x => n >= x).length
-       + MILESTONES.filter(m => n >= m.at).length;
+       + MILESTONES.filter(m => n >= m.at).length
+       + spBought();                       // 用金魚換來的
 };
 export const spSpent = () =>
   (state.me.skills || []).reduce((n, id) => n + (skillInfo(id)?.cost || 0), 0);
@@ -978,6 +1000,27 @@ export async function magicHand(toUid) {
   me.lifetime += n; me.fish += n;
   me.helped = { ...(me.helped || {}), [toUid]: (me.helped?.[toUid] || 0) + n };
   checkAchievements();
+  sync();
+  return n;
+}
+
+// 金魚換技能點。里程碑和累計門檻給的點數是固定的，後期會越來越慢，
+// 所以要有一個「一直都能推進」的來源 —— 而金魚在買完商店那幾個寶物之後
+// 本來就沒有用途了，剛好接起來。
+// 換掉的金魚記在 spBought，跟推導出來的點數相加。
+export const spBought = () => state.me.spBought || 0;
+
+export function buySkillPoint(qty = 1) {
+  const n = clampQty(qty);
+  const cost = TUNING.goldPerSkillPoint * n;
+  if (state.me.goldfish < cost)
+    throw new Error(`金魚不夠，需要 ${cost} 條`);
+  state.me.goldfish -= cost;
+  state.me.spBought = spBought() + n;
+  if (state.mode === 'member' && fb) {
+    queuePatch({ goldfish: fb.F.increment(-cost), spBought: state.me.spBought });
+    scheduleFlush();
+  } else { saveGuest(); }
   sync();
   return n;
 }

@@ -289,13 +289,14 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   const missing = axes.filter(a => !new RegExp('\\b' + a + ':').test(axDef));
   check('每條軸都有 AXES 定義', !missing.length, String(missing));
 
-  // 技能點永遠不該夠點滿整棵樹 —— 點不滿是這個設計的重點
+  // 「壓出來的」技能點不該夠點滿整棵樹 —— 要走哪條路必須是一個真的選擇。
+  // （金魚換點是後期的加速閥，刻意不算在這條裡面。）
   const steps = ((cfg.match(/export const SP_STEPS = \[(.*?)\];/s) || ['',''])[1]
                  .match(/\d+/g) || []).length;
   const miles = ((cfg.match(/export const MILESTONES = \[(.*?)\n\];/s) || ['',''])[1]
                  .match(/at:/g) || []).length;
   const treeCost = nodes.reduce((s,n) => s+n.cost, 0);
-  check('技能點永遠不夠點滿整棵樹', steps + miles < treeCost, `${steps + miles} vs ${treeCost}`);
+  check('壓出來的技能點不夠點滿整棵樹', steps + miles < treeCost, `${steps + miles} vs ${treeCost}`);
 
   // 技能的 buff.kind 要真的有人查詢，不然那個數值是白寫的
   const kinds = [...block.matchAll(/buff:\s*\{ kind:'(\w+)'/g)].map(m => m[1]);

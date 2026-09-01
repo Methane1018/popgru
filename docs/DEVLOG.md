@@ -160,6 +160,35 @@ v0.10.0 在 `MIRROR_FIELDS` 加了 `magicDay`。舊裝置的 localStorage 鏡像
 - 教訓：`increment` 的欄位要加上本機待送量，`arrayUnion` 的欄位要取聯集。
   兩者都不能照抄伺服器 —— 快照永遠比本機慢一拍
 
+## 12. 同一個 bug 修了兩次才修對
+
+v0.10.3 把快照處理改成 `mergeOwned()` 取聯集，但使用者回報**技能還是會變回可以學**。
+
+第一次只修了「讀」，沒修「寫」。`learnSkill()` 是這樣寫的：
+
+    queuePatch({ skills: fb.F.arrayUnion(id) });   // 排一筆，等 flush 送出去
+
+而 **`pendPatch` 不在待送匣裡**。待送匣只保得住點擊數（n/fish/gold）。
+所以只要那一筆遇到寫入失敗（例如 v0.10.1 那段所有寫入被拒的期間）
+又剛好關掉頁面，它就永遠消失 —— 伺服器上沒有那個技能，重整之後就又能學一次。
+
+真正的修法是不要倚賴那一筆 patch 活到成功為止：
+
+    if (me.skills?.length)    p.skills    = F.arrayUnion(...me.skills);
+    if (me.treasures?.length) p.treasures = F.arrayUnion(...me.treasures);
+
+**每次 flush 都把完整清單整份 union 回去。** arrayUnion 是冪等的，
+成本只有幾個字串，而且任何一次遺失都會在下一次寫入時自己補回來。
+
+- 教訓：**「排一筆補償寫入」跟「每次都對帳」是兩種可靠度**。
+  前者只要斷一次就永久遺失，後者會自癒
+- 教訓：修 bug 時要問「讀和寫兩邊都修了嗎」。我當時只看了讀的那一半
+
+## 13. 進度條取整之後永遠是 0
+
+金魚門檻 350，壓一下是 0.28%，`Math.round()` 之後是 0 —— 進度條看起來完全沒動。
+改成 `toFixed(2)`。小事，但那正是「看起來壞掉」的樣子。
+
 ---
 
 ## 資料庫用量

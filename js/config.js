@@ -26,6 +26,14 @@ export const firebaseConfig = {
 //  （順序是刻意的：不寫更新內容就升不了版。）
 // ----------------------------------------------------------------------------
 export const CHANGELOG = [
+  { v:'0.10.4', date:'2026-09-02', notes:[
+    '再修一次「學過的技能又變回可以學」—— 這次是從根本改：每次存檔都把完整的技能與寶物清單送上去，就算中間有一次寫入失敗也會自己補回來',
+    '🥇 金魚進度條：現在看得到距離下一條還有幾下',
+    '金魚變好拿了（每 350 下，本來是 500），🗿 石像也從 40 降到 30',
+    '後期加速：可以用 10 條金魚換 1 點技能點',
+    '「📖 線索」除了顯示掉落機率之外，也真的加 15% 掉落機率了',
+    '圖鑑的商店寶物本來寫「道具商店」，其實是在圖鑑裡點進去換，文案修正',
+  ]},
   { v:'0.10.3', date:'2026-09-02', notes:[
     '修：學會的技能過幾秒又變回「可以學」（剛拿到的東西會被伺服器的舊資料蓋掉）',
     '道具可以一次買／送好幾個，加減按鈕之外也能直接打數字',
@@ -188,7 +196,11 @@ export const TUNING = {
   cosmeticPerItem: 0.005,  // 每擁有一件裝扮，魚 +0.5%
   cosmeticCap:     0.30,   // 最多 +30%
   maxPerFlush:     2000,   // 單次批次上限，規則層擋 5000
-  goldfishOdds:    500,    // 每 N 次計分，有一次企鵝彈不回來並掉一條金魚
+  goldfishOdds:    350,    // 每 N 次計分，有一次企鵝彈不回來並掉一條金魚
+                           //   本來是 500，但金魚要湊齊三個商店寶物要兩萬八千下，
+                           //   對「收集」來說太慢了
+  goldPerSkillPoint: 10,   // 幾條金魚換一點技能點。後期唯一持續推進的來源，
+                           //   也讓金魚在買完商店寶物之後還有用途
   doubleClicks:    100,    // 雙倍魚卡生效幾次點擊
   noteMaxLen:      30,     // 紙條字數上限
   rosterSize:      50,     // 名單一次抓幾個人（10 人的圈子等於全員）
@@ -305,11 +317,11 @@ export const TREASURES = [
 
   // ── 商店（用金魚買）3 ──
   { id:'trophy',  icon:'🏆', name:'獎盃',     rarity:'uncommon', source:'shop', gold:5,
-    hint:'道具商店用 5 金魚換',         buff:{ kind:'fish', value:0.05 } },
+    hint:'圖鑑裡用 5 金魚換，點進來就看得到', buff:{ kind:'fish', value:0.05 } },
   { id:'gem',     icon:'💎', name:'原石',     rarity:'rare',     source:'shop', gold:12,
-    hint:'道具商店用 12 金魚換',        buff:{ kind:'drop', value:0.30 } },
-  { id:'monolith',icon:'🗿', name:'石像',     rarity:'myth',     source:'shop', gold:40,
-    hint:'道具商店用 40 金魚換',        buff:{ kind:'fish', value:0.12 } },
+    hint:'圖鑑裡用 12 金魚換，點進來就看得到',buff:{ kind:'drop', value:0.30 } },
+  { id:'monolith',icon:'🗿', name:'石像',     rarity:'myth',     source:'shop', gold:30,
+    hint:'圖鑑裡用 30 金魚換',           buff:{ kind:'fish', value:0.12 } },
 ];
 
 export const SOURCE_LABEL = { drop:'掉落', achieve:'成就', egg:'彩蛋', shop:'商店' };
@@ -483,7 +495,8 @@ export const SKILLS = [
   { id:'hunt1',   axis:'hunt',   tier:1, cost:1, icon:'👀', name:'眼尖',
     desc:'寶物掉落機率 +30%',            buff:{ kind:'drop', value:0.30 } },
   { id:'hunt2',   axis:'hunt',   tier:2, cost:2, icon:'📖', name:'線索',
-    desc:'圖鑑會顯示每個寶物實際的掉落機率',  grants:'hintOdds' },
+    desc:'圖鑑會顯示實際掉落機率，而且掉落機率 +15%',
+    buff:{ kind:'drop', value:0.15 }, grants:'hintOdds' },
   { id:'hunt3',   axis:'hunt',   tier:3, cost:3, icon:'⛏', name:'深掘',
     desc:'解鎖「傳說」級寶物的掉落。沒有這個，它們永遠不會出現。',
     grants:'dropEpic' },

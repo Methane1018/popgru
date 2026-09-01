@@ -386,5 +386,66 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   S.state.me.fish = 0; S.state.me.freezes = 0; S.state.me.double = 0;
 }
 
+/* --------------------------------------- 金魚與後期加速（v0.10.4） -- */
+{
+  S.state.me.skills = []; S.state.me.treasures = []; S.state.me.spBought = 0;
+  S.state.me.goldfish = 0; S.state.me.goldTick = 0; S.state.me.lifetime = 0;
+
+  ok('金魚門檻讀得到', S.goldfishOdds() === TUNING.goldfishOdds, String(S.goldfishOdds()));
+  ok('一開始進度是 0', S.goldfishProgress() === 0);
+
+  // 進度會累積，而且掉了之後歸零 —— 這是進度條的資料來源
+  TUNING.goldfishOdds = 5;
+  S.state.me.goldTick = 0; S.state.me.goldfish = 0;
+  for (let i = 0; i < 4; i++) S.squash();
+  ok('★ 金魚進度會累積', Math.abs(S.goldfishProgress() - 0.8) < 1e-9, String(S.goldfishProgress()));
+  const g0 = S.state.me.goldfish;
+  S.squash();
+  ok('★ 到門檻就掉一條金魚', S.state.me.goldfish === g0 + 1, String(S.state.me.goldfish));
+  ok('★ 掉完進度歸零', S.state.me.goldTick === 0, String(S.state.me.goldTick));
+
+  // 進度存在 me 裡面，所以重整之後不會從頭算（模擬：換一份 state 再放回去）
+  S.squash(); S.squash();
+  const saved = S.state.me.goldTick;
+  ok('★ 進度存在 me 上（重整後才不會歸零）', saved === 2, String(saved));
+
+  // 增益會讓門檻變低
+  S.state.me.treasures = ['orb'];            // 🔮 水晶球 gold +20%
+  ok('★ 寶物讓金魚更常掉', S.goldfishOdds() < 5, String(S.goldfishOdds()));
+  S.state.me.treasures = [];
+  TUNING.goldfishOdds = 350;
+
+  // 金魚換技能點
+  S.state.me.goldfish = 25; S.state.me.spBought = 0; S.state.me.lifetime = 0;
+  ok('沒換之前總點數是 0', S.spTotal() === 0, String(S.spTotal()));
+  const per = TUNING.goldPerSkillPoint;
+  S.buySkillPoint(2);
+  ok('★ 換到兩點', S.spTotal() === 2, String(S.spTotal()));
+  ok('★ 扣掉兩點的金魚', S.state.me.goldfish === 25 - per * 2, String(S.state.me.goldfish));
+  ok('★ 換來的點數可以拿去學技能', S.canLearn('press1'));
+
+  let threw = false;
+  try { S.buySkillPoint(99); } catch { threw = true; }
+  ok('★ 金魚不夠就整筆擋下', threw && S.state.me.goldfish === 25 - per * 2,
+     String(S.state.me.goldfish));
+
+  // 換來的點數要跟壓出來的相加，不是取代
+  S.state.me.lifetime = 1000;               // 門檻 500 + 里程碑 1000 = 2 點
+  ok('★ 換來的與壓出來的相加', S.spTotal() === 4, String(S.spTotal()));
+
+  // 快照比本機慢一拍時不能把換來的點數拉回去
+  ok('★ spBought 取大值不會倒退', Math.max(S.state.me.spBought, 0) === 2);
+
+  // 📖 線索不再是純 QOL
+  const { skillInfo } = await import('../js/config.js');
+  ok('★ 線索有附帶效果', !!skillInfo('hunt2').buff, JSON.stringify(skillInfo('hunt2')));
+  S.state.me.skills = ['hunt1','hunt2']; S.state.me.treasures = [];
+  ok('★ 線索的加成真的生效',
+     Math.abs(S.buffOf('drop') - 0.45) < 1e-9, String(S.buffOf('drop')));
+
+  S.state.me.skills = []; S.state.me.treasures = []; S.state.me.spBought = 0;
+  S.state.me.goldfish = 0; S.state.me.goldTick = 0; S.state.me.lifetime = 0;
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
