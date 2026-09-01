@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.10.4';
+} from './config.js?v=0.10.5';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -422,6 +422,7 @@ async function onSignedIn(user) {
       Object.assign(state.me, pickMirror(mir, srv, useMirror));
       state.me.loaded = true;      // 有了這個，flush() 才會開始寫
       repairStreak();
+      repairSkills();
       checkAchievements();          // 上線當下大家會一次達成好幾個，呼叫端要合併通知
 
       const m = state.me;
@@ -647,7 +648,7 @@ export function squash() {
 }
 
 /* ------------------------------------------------------------ 批次寫入 -- */
-let pendFish = 0, pendGold = 0, pendPatch = null, flushing = false, flushTimer = null;
+let pendFish = 0, pendGold = 0, flushing = false, flushTimer = null;
 // 正在送出、但伺服器還沒確認的量。
 // 少了這個，送出期間來的快照會用「還沒加上這批」的伺服器數字覆蓋畫面，
 // 看起來就像數字自己往回跳。
@@ -660,7 +661,21 @@ function scheduleFlush() {
   clearTimeout(flushTimer);
   flushTimer = setTimeout(() => flush(), TUNING.quietFlushMs);
 }
-const queuePatch = p => { pendPatch = { ...(pendPatch||{}), ...p }; };
+// 待寫入的欄位。**絕對不能把 FieldValue 物件直接堆在同一個 key 上** ——
+// 以前是 `pendPatch = { ...pendPatch, ...p }`，同一個 key 直接覆蓋：
+//   學會熟練 → { skills: arrayUnion('press1') }
+//   還沒送出去就學了重壓 → { skills: arrayUnion('press2') }  ← 把上一筆蓋掉
+// 伺服器只收到 press2，於是「重壓學會了，熟練卻沒有」。
+// 金魚更慘：連買兩個寶物只會扣到後面那一筆的錢。
+//
+// 所以這裡只記「意圖」（要加多少、要加哪些、要設成什麼），
+// FieldValue 等到 flush 的時候才組出來，合併規則才會是對的。
+let pendInc = {}, pendUnion = {}, pendSet = {}, pendReconcile = false;
+const queueInc   = (f, n) => { pendInc[f] = (pendInc[f] || 0) + n; };   // 相加
+const queueUnion = (f, v) => { (pendUnion[f] ||= new Set()).add(v); };  // 取聯集
+const queueSet   = (f, v) => { pendSet[f] = v; };                       // 絕對值，新的贏
+const hasPend = () => pendReconcile
+  || Object.keys(pendInc).length || Object.keys(pendUnion).length || Object.keys(pendSet).length;
 
 export async function flush() {
   if (state.mode !== 'member' || !fb) return;
@@ -680,12 +695,14 @@ export async function flush() {
   // 要等 8 秒的保底定時器才會被撿走，剛好卡在「壓完馬上關掉」的空隙。
   if (flushing) { scheduleFlush(); return; }
   clearTimeout(flushTimer);
-  const n = state.pending, fish = pendFish, gold = pendGold, patch = pendPatch, target = flushTarget;
-  if (!n && !fish && !gold && !patch) return;
+  const n = state.pending, fish = pendFish, gold = pendGold, target = flushTarget;
+  const inc = pendInc, uni = pendUnion, set = pendSet;
+  if (!n && !fish && !gold && !hasPend()) return;
 
   flushing = true;
   inflight = { n, fish, gold };                 // 送出期間先記著，快照才不會把畫面往回拉
-  state.pending = 0; pendFish = 0; pendGold = 0; pendPatch = null; flushTarget = null;
+  state.pending = 0; pendFish = 0; pendGold = 0; flushTarget = null;
+  pendInc = {}; pendUnion = {}; pendSet = {}; pendReconcile = false;
   const { F, db } = fb, me = state.me;
   try {
     const b = F.writeBatch(db);
@@ -696,8 +713,10 @@ export async function flush() {
       todayCount: me.todayCount, helpToday: me.helpToday, helpDay: me.helpDay,
       freezes: me.freezes, double: me.double, magicDay: me.magicDay,
       goldTick: me.goldTick,
-      ...(patch || {}),
+      ...set,
     };
+    for (const [f, v] of Object.entries(inc))  if (v) p[f] = F.increment(v);
+    for (const [f, s] of Object.entries(uni))  if (s.size) p[f] = F.arrayUnion(...s);
     // 保險絲：只要有一個欄位是 undefined，Firestore 就會拒絕整批寫入，
     // 連帶所有累積的點擊都送不出去。寧可少寫一個欄位也不要全部停擺 ——
     // 但一定要吼出來，這種情況永遠是 bug。
@@ -754,7 +773,11 @@ export async function flush() {
       `  等在待送匣的不會掉，但伺服器沒收到`);
     if (failCount === 3) emit('writefail', { code: e && e.code, message: e && e.message });
     state.pending += n; pendFish += fish; pendGold += gold;
-    flushTarget = target; if (patch) queuePatch(patch);
+    flushTarget = target;
+    // 退回去也要用合併的方式，不能整包塞回去 —— 這段期間可能又累積了新的
+    for (const [f, v] of Object.entries(inc)) queueInc(f, v);
+    for (const [f, s] of Object.entries(uni)) s.forEach(v => queueUnion(f, v));
+    for (const [f, v] of Object.entries(set)) if (!(f in pendSet)) pendSet[f] = v;
   } finally {
     flushing = false;
     inflight = { n:0, fish:0, gold:0 };
@@ -1018,11 +1041,33 @@ export function buySkillPoint(qty = 1) {
   state.me.goldfish -= cost;
   state.me.spBought = spBought() + n;
   if (state.mode === 'member' && fb) {
-    queuePatch({ goldfish: fb.F.increment(-cost), spBought: state.me.spBought });
+    queueInc('goldfish', -cost);
+    queueSet('spBought', state.me.spBought);
     scheduleFlush();
   } else { saveGuest(); }
   sync();
   return n;
+}
+
+// 修補：只要擁有某一層，前面所有層一定都付過錢（學的時候有前置檢查）。
+// v0.10.4 之前的 queuePatch 會把同一個 key 的 arrayUnion 互相蓋掉，
+// 於是有人變成「重壓學會了，熟練卻沒有」。這裡把缺的補回去。
+export function repairSkills() {
+  const have = new Set(state.me.skills || []);
+  let added = 0;
+  for (const id of [...have]) {
+    const sk = skillInfo(id);
+    if (!sk) continue;
+    for (const lower of SKILLS.filter(s => s.axis === sk.axis && s.tier < sk.tier)) {
+      if (!have.has(lower.id)) { have.add(lower.id); added++; }
+    }
+  }
+  if (!added) return 0;
+  state.me.skills = [...have];
+  console.warn(`POPGRU 補回 ${added} 個被寫入問題弄丟的技能`);
+  if (state.mode === 'member' && fb) { pendReconcile = true; scheduleFlush(); }
+  else { saveGuest(); }
+  return added;
 }
 
 export function learnSkill(id) {
@@ -1030,7 +1075,9 @@ export function learnSkill(id) {
   if (why) throw new Error(why);
   state.me.skills = [...(state.me.skills || []), id];
   if (state.mode === 'member' && fb) {
-    queuePatch({ skills: fb.F.arrayUnion(id) });
+    // 不用排一筆 arrayUnion：flush 每次都會把完整清單送上去，
+    // 這裡只要讓它知道「有東西要對帳」就好
+    pendReconcile = true;
     scheduleFlush();
   } else { saveGuest(); }
   checkAchievements();            // 點滿一整條軸會拿到 🌳 專精
@@ -1057,7 +1104,7 @@ export function unlockTreasure(id, quiet) {
   if (!treasureInfo(id) || hasTreasure(id)) return false;
   state.me.treasures = [...state.me.treasures, id];
   if (state.mode === 'member' && fb) {
-    queuePatch({ treasures: fb.F.arrayUnion(id) });
+    pendReconcile = true;
     scheduleFlush();
   } else { saveGuest(); }
   if (!quiet) emit('treasure', treasureInfo(id));
@@ -1072,7 +1119,8 @@ export async function buyTreasure(id) {
   if (state.me.goldfish < t.gold) throw new Error(`金魚不夠，需要 ${t.gold} 條`);
   state.me.goldfish -= t.gold;
   if (state.mode === 'member' && fb) {
-    queuePatch({ goldfish: fb.F.increment(-t.gold) });
+    queueInc('goldfish', -t.gold);
+    scheduleFlush();
   }
   unlockTreasure(id);
   sync();

@@ -17,7 +17,7 @@ const check = (name, ok, detail = '') => {
 // 1) flush() 寫回的絕對欄位，必須跟第一次快照讀進來的欄位一字不差。
 //    少一邊就會出現「幫忙額度自己跳回 300」「連續天數歸零」。
 {
-  const w = store.match(/const p = \{\s*lastSeen: F\.serverTimestamp\(\),(.*?)\.\.\.\(patch/s);
+  const w = store.match(/const p = \{\s*lastSeen: F\.serverTimestamp\(\),(.*?)\.\.\.set,/s);
   const r = store.match(/const srv = \{(.*?)\};/s);
   if (!w || !r) check('flush 與快照的絕對欄位區塊都存在', false, '找不到其中一段');
   else {
@@ -40,7 +40,7 @@ const check = (name, ok, detail = '') => {
   if (!mf) check('MIRROR_FIELDS 存在', false);
   else {
     const M = new Set([...mf[1].matchAll(/'(\w+)'/g)].map(m => m[1]));
-    const W = new Set([...(store.match(/const p = \{\s*lastSeen: F\.serverTimestamp\(\),(.*?)\.\.\.\(patch/s) || ['',''])[1]
+    const W = new Set([...(store.match(/const p = \{\s*lastSeen: F\.serverTimestamp\(\),(.*?)\.\.\.set,/s) || ['',''])[1]
                         .matchAll(/(\w+):/g)].map(m => m[1]));
     const onlyW = [...W].filter(x => !M.has(x));
     const onlyM = [...M].filter(x => !W.has(x));
@@ -174,14 +174,40 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   }
 }
 
+// FieldValue（increment / arrayUnion）只能在 flush() 裡面組出來。
+//
+// 之前是在各處先做好 FieldValue 再丟進 pendPatch，而 pendPatch 是用物件展開合併的：
+// 同一個 key 的第二筆會把第一筆整個蓋掉。症狀是「重壓學會了，熟練卻沒有」，
+// 以及連買兩個寶物只扣到後面那一筆的錢。
+// 待寫入的東西要記「意圖」（加多少、加哪些），FieldValue 等到要寫的時候才組。
+{
+  check('沒有殘留的 queuePatch', !/\bqueuePatch\s*\(/.test(store),
+        '改用 queueInc / queueUnion / queueSet');
+
+  // 排進佇列的一定要是「意圖」（數字、字串），不能是已經做好的 FieldValue ——
+  // 那正是會被覆蓋掉的東西。（直接 b.set() 的地方用 FieldValue 沒問題。）
+  const queued = [...store.matchAll(/queue(?:Inc|Set|Union)\(([^;]*?)\);/g)].map(m => m[1]);
+  const bad = queued.filter(a => /F\.(increment|arrayUnion|serverTimestamp)/.test(a));
+  check('排進佇列的不是 FieldValue', !bad.length, String(bad));
+
+  // 累加型的佇列不能用覆蓋的方式合併
+  check('queueInc 是相加不是覆蓋', /pendInc\[f\] = \(pendInc\[f\] \|\| 0\) \+ n/.test(store));
+  check('queueUnion 用 Set 取聯集', /pendUnion\[f\] \|\|= new Set\(\)/.test(store));
+
+  // 缺前置的技能要補得回來
+  check('有 repairSkills 修補既有壞資料', /export function repairSkills/.test(store));
+  check('載入後會呼叫 repairSkills', /repairStreak\(\);\s*\n\s*repairSkills\(\);/.test(store));
+}
+
 // 用 arrayUnion 寫出去的欄位，是「只增不減」的持有清單。
 // 快照處理絕對不能照抄伺服器的值：從按下按鈕到 flush 真的寫進去之間最長 20 秒，
 // 中間任何一次快照回音都會把剛拿到的東西抹掉。
 // （v0.10.2 的症狀：學會「熟練」之後那個節點又變成可以點。）
 {
+  // 每次 flush 都整份送上去的持有清單。這些欄位在快照那邊一定要取聯集。
   const unioned = [...new Set(
-    [...store.matchAll(/queuePatch\(\{\s*(\w+):\s*fb\.F\.arrayUnion/g)].map(m => m[1]))];
-  check('讀得到 arrayUnion 欄位', unioned.length > 0, String(unioned));
+    [...store.matchAll(/p\.(\w+)\s*=\s*F\.arrayUnion\(\.\.\.me\./g)].map(m => m[1]))];
+  check('讀得到整份 union 的欄位', unioned.length > 0, String(unioned));
 
   const snap = (store.match(/Object\.assign\(state\.me, \{(.*?)\n    \}\);/s) || ['',''])[1];
   const clobbered = unioned.filter(f =>

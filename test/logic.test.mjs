@@ -447,5 +447,38 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   S.state.me.goldfish = 0; S.state.me.goldTick = 0; S.state.me.lifetime = 0;
 }
 
+/* ------------------------------ 被寫入問題弄丟的技能（v0.10.5） -- */
+// 真實災情：使用者的「重壓」是學會的，「熟練」卻顯示還沒學。
+// 那不可能靠正常操作發生 —— 學重壓一定要先有熟練。
+// 原因是 pendPatch 用物件展開合併，同一個 key 的 arrayUnion 會互相蓋掉：
+//   { skills: arrayUnion('press1') } → { skills: arrayUnion('press2') }
+// 伺服器只收到後面那一筆。
+{
+  S.state.me.skills = ['press2']; S.state.me.treasures = [];
+  const n = S.repairSkills();
+  ok('★ 補回被弄丟的前置技能', S.hasSkill('press1'), S.state.me.skills.join(','));
+  ok('★ 回報補了幾個', n === 1, String(n));
+  ok('原本就有的不會重複', S.state.me.skills.filter(x => x === 'press2').length === 1);
+
+  ok('★ 已經完整時不會亂動', S.repairSkills() === 0);
+
+  // 第四層被弄丟前三層 → 三個都要補回來
+  S.state.me.skills = ['hunt4'];
+  ok('★ 補回一整條軸', S.repairSkills() === 3 &&
+     ['hunt1','hunt2','hunt3'].every(x => S.hasSkill(x)), S.state.me.skills.join(','));
+
+  // 只補同一條軸，不會亂送別條軸的技能
+  S.state.me.skills = ['press2'];
+  S.repairSkills();
+  ok('★ 不會多送別條軸的技能',
+     S.state.me.skills.every(x => x.startsWith('press')), S.state.me.skills.join(','));
+
+  // 空的不會炸
+  S.state.me.skills = [];
+  ok('沒有技能時不會炸', S.repairSkills() === 0);
+
+  S.state.me.skills = [];
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
