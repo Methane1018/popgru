@@ -214,6 +214,12 @@
   .input{width:100%; font:inherit; font-size:15px; padding:10px 12px; border-radius:12px;
          border:1px solid var(--line); background:var(--bg); color:var(--ink)}
   .grid{display:flex; flex-wrap:wrap; gap:8px; margin:4px 0}
+  /* 帽子和手持物是 52px 的符號按鈕，所以格子固定 60px；
+     但背景／顏色／字體用的是文字按鈕（min-width 92px），塞進 60px 就會互相疊住。
+     這一類改用等寬網格，格子自己撐開。 */
+  .grid.text{display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:8px}
+  .grid.text .hat-cell{width:auto; min-width:0}
+  .grid.text .skin-btn{width:100%; min-width:0}
   /* 裝扮的分類切換 */
   .tabs{display:flex; gap:6px; flex-wrap:wrap; margin:2px 0 6px}
   .tab{appearance:none; border:1px solid var(--line); background:var(--card); color:var(--muted);
@@ -228,6 +234,21 @@
   .dex-cell.got{border-width:2px}
   .dex-icon{font-size:26px; line-height:1.1}
   .dex-cell.locked .dex-icon{filter:grayscale(1) opacity(.35)}
+  /* 「拿不到」比「還沒拿到」更暗，而且掛一個灰鎖頭 —— 一眼就分得出來 */
+  .dex-cell.gated{background:var(--bg-2); border-style:dashed}
+  .dex-cell.gated .dex-icon{filter:grayscale(1); opacity:.45}
+  .dex-cell.gated .dex-sub{color:var(--muted); font-weight:700}
+  .dex-sub{white-space:pre-line}
+  .dex-line.gated-line{color:var(--muted); font-weight:700}
+
+  /* 數量選擇器 */
+  .qty{display:flex; align-items:center; gap:6px; margin:2px 4px 4px; flex-wrap:wrap}
+  .qty-b{width:42px; height:42px; padding:0; font-size:20px; font-weight:800; border-radius:12px}
+  .qty-in{width:74px; height:42px; text-align:center; font:inherit; font-size:17px; font-weight:800;
+          border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--ink);
+          font-variant-numeric:tabular-nums}
+  .qty-in:focus{outline:2px solid var(--accent); outline-offset:1px}
+  .qty-total{font-size:14px; font-weight:800; margin:0 4px 10px}
   .dex-name{font-size:12px; font-weight:800; line-height:1.25}
   .dex-cell.locked .dex-name{color:var(--muted); font-weight:700}
   .dex-sub{font-size:10.5px; color:var(--muted); line-height:1.4}
@@ -284,7 +305,7 @@
   .emoji-btn.on{border-color:var(--accent); background:var(--bg-2); box-shadow:0 0 0 2px var(--accent) inset}
   .emoji-btn.locked{opacity:.3; cursor:default}
   .emoji-btn.poor{opacity:.55}          /* 買得到，但魚不夠 */
-  .skin-btn{appearance:none; min-width:92px; padding:11px 13px; font:inherit; font-size:13px;
+  .skin-btn{appearance:none; min-width:92px; padding:9px 10px; font:inherit; font-size:12.5px;
             font-weight:700; cursor:pointer; border-radius:12px; border:1px solid var(--line);
             background:var(--card); color:var(--ink); text-align:center}
   .skin-btn.on{border-color:var(--accent); box-shadow:0 0 0 2px var(--accent) inset}
@@ -411,6 +432,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=0.10.2"></script>
+<script type="module" src="js/app.js?v=0.10.3"></script>
 </body>
 </html>

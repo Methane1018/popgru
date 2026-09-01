@@ -174,6 +174,26 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   }
 }
 
+// 用 arrayUnion 寫出去的欄位，是「只增不減」的持有清單。
+// 快照處理絕對不能照抄伺服器的值：從按下按鈕到 flush 真的寫進去之間最長 20 秒，
+// 中間任何一次快照回音都會把剛拿到的東西抹掉。
+// （v0.10.2 的症狀：學會「熟練」之後那個節點又變成可以點。）
+{
+  const unioned = [...new Set(
+    [...store.matchAll(/queuePatch\(\{\s*(\w+):\s*fb\.F\.arrayUnion/g)].map(m => m[1]))];
+  check('讀得到 arrayUnion 欄位', unioned.length > 0, String(unioned));
+
+  const snap = (store.match(/Object\.assign\(state\.me, \{(.*?)\n    \}\);/s) || ['',''])[1];
+  const clobbered = unioned.filter(f =>
+    new RegExp(`${f}:\\s*Array\\.isArray\\(d\\.${f}\\)`).test(snap));
+  check('持有清單不會被快照照抄覆蓋', !clobbered.length,
+        `${clobbered} 應該用 mergeOwned() 取聯集`);
+
+  const merged = unioned.filter(f => new RegExp(`${f}:\\s*mergeOwned\\(`).test(snap));
+  check('持有清單都用 mergeOwned 合併', merged.length === unioned.length,
+        `少了 ${unioned.filter(f => !merged.includes(f))}`);
+}
+
 // nav 的按鈕是「圖示 <i> ＋ 標籤 <em>」兩層。
 // 對它們直接寫 .textContent 會把兩個 span 一起洗掉，按鈕就只剩一個字，
 // 而且只有在「有未讀信」或「按了靜音」之後才看得到 —— 典型的靜默故障。

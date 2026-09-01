@@ -7,10 +7,10 @@
 // ============================================================================
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
-  ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
+  ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.10.2';
+} from './config.js?v=0.10.3';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -216,6 +216,13 @@ function prefillFromMirror() {
 //
 // 這是「新增一個 MIRROR_FIELDS 欄位」時必然會踩到的坑，跟欄位是什麼無關，
 // 所以修在這裡而不是修 magicDay。
+// 合併「只增不減」的持有清單（寶物、技能）。
+// 本機可能有還沒寫出去的新項目，伺服器可能有別的裝置加的 —— 兩邊都要留。
+export const mergeOwned = (local, server) => Array.from(new Set([
+  ...(Array.isArray(local)  ? local  : []),
+  ...(Array.isArray(server) ? server : []),
+]));
+
 export function pickMirror(mir, srv, useMirror) {
   const out = {};
   for (const f of MIRROR_FIELDS) {
@@ -379,8 +386,12 @@ async function onSignedIn(user) {
         ...(state.myGru.hat ? [state.myGru.hat] : []),
       ])),
       ownedSkins: Array.isArray(d.ownedSkins) ? d.ownedSkins : [],
-      treasures: Array.isArray(d.treasures) ? d.treasures : [],
-      skills:    Array.isArray(d.skills)    ? d.skills    : [],
+      // 這兩個是「只增不減」而且用 arrayUnion 寫出去的，所以要取聯集不能照抄。
+      // 照抄的話，從 learnSkill() 到 flush() 真的寫進去之間（最長 20 秒），
+      // 任何一次快照回音都會把剛學的技能／剛掉的寶物抹掉 ——
+      // 畫面上就是「點過的技能又變成可以點」。
+      treasures: mergeOwned(state.me.treasures, d.treasures),
+      skills:    mergeOwned(state.me.skills,    d.skills),
       helped: (d.helped && typeof d.helped === 'object') ? d.helped : {},
       giftsReceived: d.giftsReceived || 0,
       nick: realName(d.nick),
@@ -1105,14 +1116,15 @@ const markPoke = uid => {
   } catch {}
 };
 
-export async function sendItem(toUid, key, extra = {}) {
+export async function sendItem(toUid, key, extra = {}, qty = 1) {
   if (state.mode !== 'member') throw new Error('要登入才能送東西');
   const item = ITEMS[key];
   if (!item)                            throw new Error('沒有這個道具');
   if (toUid === state.me.uid)           throw new Error('不能送給自己');
   if (key === 'poke' && !canPoke(toUid)) throw new Error('剛剛才戳過，等一下再戳');
 
-  const cost = itemCost(key);
+  const n = item.stack ? clampQty(qty) : 1;
+  const cost = itemCost(key) * n;
   const bal = item.gold ? state.me.goldfish : state.me.fish;
   if (cost > 0 && bal < cost) throw new Error(item.gold ? '金魚不夠' : '魚不夠');
 
@@ -1121,7 +1133,7 @@ export async function sendItem(toUid, key, extra = {}) {
   const b = F.writeBatch(fb.db);
   b.set(F.doc(inboxCol(toUid)), {
     from:state.me.uid, fromName:state.me.name, type:key,
-    at:F.serverTimestamp(), read:false, ...extra,
+    at:F.serverTimestamp(), read:false, ...(n > 1 ? { qty:n } : {}), ...extra,
   });
   if (cost > 0) {
     b.set(userRef(state.me.uid),
@@ -1139,15 +1151,16 @@ export async function sendItem(toUid, key, extra = {}) {
   if (key === 'poke') markPoke(toUid);
 }
 
-export async function buyForSelf(key, extra = {}) {
+export async function buyForSelf(key, qty = 1) {
   const item = ITEMS[key], me = state.me;
   if (!item?.self)        throw new Error('這個不能買給自己');
-  const cost = itemCost(key);
+  const n = item.stack ? clampQty(qty) : 1;
+  const cost = itemCost(key) * n;
   if (me.fish < cost) throw new Error('魚不夠');
 
   me.fish -= cost;
-  if (key === 'freeze') me.freezes += 1;
-  if (key === 'double') me.double  += TUNING.doubleClicks + buffOf('double');   // 🌌 星塵
+  if (key === 'freeze') me.freezes += n;
+  if (key === 'double') me.double  += (TUNING.doubleClicks + buffOf('double')) * n;   // 🌌 星塵
   sync();
 
   if (state.mode === 'member' && fb) {
@@ -1170,10 +1183,12 @@ export async function collectInbox() {
   const me = state.me;
   let fish = 0, freezes = 0, dbl = 0, medals = 0, hat = null;
   for (const m of unread) {
-    if (m.type === 'fish')   fish    += (ITEMS.fish.gives || 20);
-    if (m.type === 'freeze') freezes += 1;
-    if (m.type === 'double') dbl     += TUNING.doubleClicks + buffOf('double');
-    if (m.type === 'medal')  medals  += 1;
+    // 一封信可能是一次送好幾個。沒有 qty 的舊信件就是 1。
+    const q = clampQty(m.qty || 1);
+    if (m.type === 'fish')   fish    += (ITEMS.fish.gives || 20) * q;
+    if (m.type === 'freeze') freezes += q;
+    if (m.type === 'double') dbl     += (TUNING.doubleClicks + buffOf('double')) * q;
+    if (m.type === 'medal')  medals  += q;
     if (m.type === 'hat')    hat      = m.hat || '🎩';
   }
   try {

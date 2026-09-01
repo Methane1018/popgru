@@ -324,5 +324,67 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
      !Object.values(everyField).some(v => v === undefined), JSON.stringify(everyField));
 }
 
+/* ------------------------------------ 持有清單不能被快照蓋掉（v0.10.3） -- */
+// 真實災情：學會「熟練」之後那個節點又變成可以點。
+// 原因是快照處理直接照抄伺服器的 skills 陣列，而剛學的那個還在待送匣裡，
+// 伺服器上還沒有 —— 於是每次快照回音都把它抹掉一次。
+{
+  ok('★ 本機剛學的不會被伺服器蓋掉',
+     S.mergeOwned(['press1'], []).includes('press1'),
+     JSON.stringify(S.mergeOwned(['press1'], [])));
+  ok('★ 別的裝置學的也會收進來',
+     S.mergeOwned([], ['hunt1']).includes('hunt1'));
+  ok('★ 兩邊都有的只算一次',
+     S.mergeOwned(['press1','hunt1'], ['hunt1','social1']).length === 3,
+     JSON.stringify(S.mergeOwned(['press1','hunt1'], ['hunt1','social1'])));
+  ok('伺服器還沒有這個欄位時不會炸',
+     S.mergeOwned(['press1'], undefined).length === 1);
+  ok('本機是空的也不會炸', S.mergeOwned(undefined, ['press1']).length === 1);
+  ok('兩邊都沒有就是空陣列', S.mergeOwned(undefined, undefined).length === 0);
+}
+
+/* ------------------------------------------------- 批量購買（v0.10.3） -- */
+{
+  const { clampQty, ITEMS, MAX_QTY } = await import('../js/config.js');
+  ok('數量下限是 1', clampQty(0) === 1 && clampQty(-5) === 1);
+  ok('數量上限是 99', clampQty(1000) === MAX_QTY, String(clampQty(1000)));
+  ok('小數會取整', clampQty(3.9) === 3, String(clampQty(3.9)));
+  ok('亂打字當作 1', clampQty('abc') === 1 && clampQty(NaN) === 1);
+  ok('可以自訂上限', clampQty(50, 7) === 7, String(clampQty(50, 7)));
+
+  // 只有能疊的道具才有數量
+  ok('★ 紙條和帽子不能疊', !ITEMS.note.stack && !ITEMS.hat.stack);
+  ok('★ 凍結卡、雙倍魚、送魚、金牌可以疊',
+     ITEMS.freeze.stack && ITEMS.double.stack && ITEMS.fish.stack && ITEMS.medal.stack);
+
+  S.state.me.treasures = []; S.state.me.skills = [];
+  const unit = S.itemCost('freeze');
+  S.state.me.fish = unit * 10; S.state.me.freezes = 0;
+  await S.buyForSelf('freeze', 3);
+  ok('★ 一次買三張凍結卡', S.state.me.freezes === 3, String(S.state.me.freezes));
+  ok('★ 扣的是三張的錢', S.state.me.fish === unit * 7, String(S.state.me.fish));
+
+  // 雙倍魚是「加次數」，數量要跟著乘
+  S.state.me.fish = S.itemCost('double') * 5; S.state.me.double = 0;
+  await S.buyForSelf('double', 2);
+  ok('★ 兩張雙倍魚 = 兩倍次數',
+     S.state.me.double === (TUNING.doubleClicks + S.buffOf('double')) * 2,
+     String(S.state.me.double));
+
+  // 買不起就整筆擋下來，不能只買一部分
+  S.state.me.fish = unit * 2; S.state.me.freezes = 0;
+  let threw = false;
+  try { await S.buyForSelf('freeze', 5); } catch { threw = true; }
+  ok('★ 買不起就整筆擋下', threw && S.state.me.freezes === 0 && S.state.me.fish === unit * 2,
+     `freezes=${S.state.me.freezes} fish=${S.state.me.fish}`);
+
+  // 數量亂給也不會出事
+  S.state.me.fish = unit * 200; S.state.me.freezes = 0;
+  await S.buyForSelf('freeze', 99999);
+  ok('★ 數量灌爆會被夾到上限', S.state.me.freezes === MAX_QTY, String(S.state.me.freezes));
+
+  S.state.me.fish = 0; S.state.me.freezes = 0; S.state.me.double = 0;
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

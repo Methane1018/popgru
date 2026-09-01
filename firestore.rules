@@ -88,7 +88,13 @@ service cloud.firestore {
                       && request.resource.data.read == false
                       && (!('text' in request.resource.data)
                           || (request.resource.data.text is string
-                              && request.resource.data.text.size() <= 60));
+                              && request.resource.data.text.size() <= 60))
+                      // 一次可以送好幾個，但要有上限：
+                      // 沒有這一條的話，一封信就能塞給對方一億條魚
+                      && (!('qty' in request.resource.data)
+                          || (request.resource.data.qty is int
+                              && request.resource.data.qty >= 1
+                              && request.resource.data.qty <= 99));
       }
     }
 

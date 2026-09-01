@@ -26,6 +26,14 @@ export const firebaseConfig = {
 //  （順序是刻意的：不寫更新內容就升不了版。）
 // ----------------------------------------------------------------------------
 export const CHANGELOG = [
+  { v:'0.10.3', date:'2026-09-02', notes:[
+    '修：學會的技能過幾秒又變回「可以學」（剛拿到的東西會被伺服器的舊資料蓋掉）',
+    '道具可以一次買／送好幾個，加減按鈕之外也能直接打數字',
+    '圖鑑除了彩蛋之外都直接寫出取得條件，稀有度也不再遮起來',
+    '現在還掉不到的寶物會標上灰鎖頭，直接告訴你缺哪個技能',
+    '「📖 線索」改成顯示實際掉落機率',
+    '修：裝扮商店的背景／顏色／字體按鈕互相疊在一起',
+  ]},
   { v:'0.10.2', date:'2026-09-02', notes:[
     '下面那排按鈕重排：圖示在上、字在下，不會再擠成參差的兩列',
     '信箱有未讀時會直接顯示幾封',
@@ -233,27 +241,27 @@ export const RARITY_ORDER = ['common','uncommon','rare','epic','myth'];
 export const TREASURES = [
   // ── 機率掉落 11 ──
   { id:'sweat',   icon:'💦', name:'汗珠',     rarity:'common',   source:'drop',
-    hint:'壓著壓著就會掉',            buff:{ kind:'fish', value:0.02 } },
+    hint:'壓扁時隨機掉落',            buff:{ kind:'fish', value:0.02 } },
   { id:'down',    icon:'🪶', name:'絨毛',     rarity:'common',   source:'drop',
-    hint:'壓著壓著就會掉',            buff:{ kind:'drop', value:0.20 } },
+    hint:'壓扁時隨機掉落',            buff:{ kind:'drop', value:0.20 } },
   { id:'shard',   icon:'🧊', name:'碎冰',     rarity:'common',   source:'drop',
-    hint:'壓著壓著就會掉',            buff:{ kind:'freezeOff', value:0.30 } },
+    hint:'壓扁時隨機掉落',            buff:{ kind:'freezeOff', value:0.30 } },
   { id:'shell',   icon:'🐚', name:'貝殼',     rarity:'uncommon', source:'drop',
-    hint:'要壓久一點才看得到',        buff:{ kind:'fish', value:0.05 } },
+    hint:'壓扁時隨機掉落',            buff:{ kind:'fish', value:0.05 } },
   { id:'orb',     icon:'🔮', name:'水晶球',   rarity:'uncommon', source:'drop',
-    hint:'要壓久一點才看得到',        buff:{ kind:'gold', value:0.20 } },
+    hint:'壓扁時隨機掉落',            buff:{ kind:'gold', value:0.20 } },
   { id:'compass', icon:'🧭', name:'羅盤',     rarity:'uncommon', source:'drop',
-    hint:'要壓久一點才看得到',        buff:{ kind:'help', value:50 } },
+    hint:'壓扁時隨機掉落',            buff:{ kind:'help', value:50 } },
   { id:'crown',   icon:'👑', name:'王冠碎片', rarity:'rare',     source:'drop',
-    hint:'比較難掉的那種',            buff:{ kind:'fish', value:0.08 } },
+    hint:'壓扁時隨機掉落',            buff:{ kind:'fish', value:0.08 } },
   { id:'quill',   icon:'🖋', name:'冰筆',     rarity:'rare',     source:'drop',
-    hint:'比較難掉的那種',            buff:{ kind:'giftOff', value:0.08 } },
+    hint:'壓扁時隨機掉落',            buff:{ kind:'giftOff', value:0.08 } },
   { id:'stardust',icon:'🌌', name:'星塵',     rarity:'epic',     source:'drop',
-    hint:'挖得夠深才見得到',          buff:{ kind:'double', value:50 } },
+    hint:'壓扁時隨機掉落',            buff:{ kind:'double', value:50 } },
   { id:'aurora',  icon:'🌠', name:'極光',     rarity:'epic',     source:'drop',
-    hint:'挖得夠深才見得到',          buff:{ kind:'gold', value:0.30 } },
+    hint:'壓扁時隨機掉落',            buff:{ kind:'gold', value:0.30 } },
   { id:'core',    icon:'🌟', name:'格魯之心', rarity:'myth',     source:'drop',
-    hint:'據說它一直都在，只是沒人看得見', buff:{ kind:'fish', value:0.15 } },
+    hint:'壓扁時隨機掉落',            buff:{ kind:'fish', value:0.15 } },
 
   // ── 成就 11 ──
   { id:'first',   icon:'🥚', name:'第一下',   rarity:'common',   source:'achieve',
@@ -277,8 +285,7 @@ export const TREASURES = [
   { id:'hatlove', icon:'🎩', name:'帽癡',     rarity:'epic',     source:'achieve',
     hint:'集滿所有帽子',               buff:{ kind:'fish', value:0.05 } },
   { id:'master',  icon:'🌳', name:'專精',     rarity:'myth',     source:'achieve',
-    hint:'把一條路走到底',
-    how:'把任何一條技能軸的四個技能全部學會',    buff:{ kind:'fish', value:0.10 } },
+    hint:'把任何一條技能軸的四個技能全部學會',    buff:{ kind:'fish', value:0.10 } },
 
   // ── 彩蛋 4 ──
   // 彩蛋的 hint 是「還沒拿到時」看到的，要隱晦；
@@ -298,11 +305,11 @@ export const TREASURES = [
 
   // ── 商店（用金魚買）3 ──
   { id:'trophy',  icon:'🏆', name:'獎盃',     rarity:'uncommon', source:'shop', gold:5,
-    hint:'商店裡用金魚換',              buff:{ kind:'fish', value:0.05 } },
+    hint:'道具商店用 5 金魚換',         buff:{ kind:'fish', value:0.05 } },
   { id:'gem',     icon:'💎', name:'原石',     rarity:'rare',     source:'shop', gold:12,
-    hint:'商店裡用金魚換',              buff:{ kind:'drop', value:0.30 } },
+    hint:'道具商店用 12 金魚換',        buff:{ kind:'drop', value:0.30 } },
   { id:'monolith',icon:'🗿', name:'石像',     rarity:'myth',     source:'shop', gold:40,
-    hint:'商店最深處那個很貴的東西',     buff:{ kind:'fish', value:0.12 } },
+    hint:'道具商店用 40 金魚換',        buff:{ kind:'fish', value:0.12 } },
 ];
 
 export const SOURCE_LABEL = { drop:'掉落', achieve:'成就', egg:'彩蛋', shop:'商店' };
@@ -312,15 +319,22 @@ export const treasureHow = t => t.how || t.hint;
 
 // 商店。cost 是魚；gold=true 的要用金魚買。
 // self=true 代表可以買給自己，give=true 代表可以送人。
+// stack=true 代表可以一次買／送很多個。紙條和帽子沒有意義（一句話、一頂），
+// 戳一下有冷卻，所以這三個沒有數量。
 export const ITEMS = {
   poke:   { emoji:'👉', name:'戳一下',   cost:  0, give:true,            desc:'免費。在名單上點一下就送出' },
   note:   { emoji:'💌', name:'紙條',     cost:  8, give:true, text:true, desc:'留一句話，30 字以內' },
-  fish:   { emoji:'🐟', name:'送魚',     cost: 25, give:true, gives:20,  desc:'對方收到 20 條魚（虧本，但是心意）' },
-  freeze: { emoji:'🧊', name:'凍結卡',   cost: 60, give:true, self:true, desc:'漏掉一天時自動用掉，保住連續天數' },
+  fish:   { emoji:'🐟', name:'送魚',     cost: 25, give:true, gives:20, stack:true, desc:'對方收到 20 條魚（虧本，但是心意）' },
+  freeze: { emoji:'🧊', name:'凍結卡',   cost: 60, give:true, self:true, stack:true, desc:'漏掉一天時自動用掉，保住連續天數' },
   hat:    { emoji:'🎩', name:'帽子',     cost: 60, give:true, hat:true, desc:'送一頂帽子給朋友，他會直接戴上而且永久解鎖' },
-  double: { emoji:'⚡', name:'雙倍魚',   cost: 80, give:true, self:true, desc:'接下來 100 下拿雙倍魚（不影響每日上限）' },
-  medal:  { emoji:'🏅', name:'金牌',     cost:  1, give:true, gold:true, desc:'用金魚買，永久掛在對方名字旁邊' },
+  double: { emoji:'⚡', name:'雙倍魚',   cost: 80, give:true, self:true, stack:true, desc:'接下來 100 下拿雙倍魚（不影響每日上限）' },
+  medal:  { emoji:'🏅', name:'金牌',     cost:  1, give:true, gold:true, stack:true, desc:'用金魚買，永久掛在對方名字旁邊' },
 };
+
+// 一次最多買／送幾個。上限存在的理由是手滑打錯數字，不是平衡。
+export const MAX_QTY = 99;
+export const clampQty = (n, max = MAX_QTY) =>
+  Math.max(1, Math.min(max, Math.floor(Number(n)) || 1));
 
 // 帽子樣式。前四個一開始就有，後面靠里程碑解鎖。
 // 格魯預設名字
@@ -469,7 +483,7 @@ export const SKILLS = [
   { id:'hunt1',   axis:'hunt',   tier:1, cost:1, icon:'👀', name:'眼尖',
     desc:'寶物掉落機率 +30%',            buff:{ kind:'drop', value:0.30 } },
   { id:'hunt2',   axis:'hunt',   tier:2, cost:2, icon:'📖', name:'線索',
-    desc:'圖鑑裡還沒拿到的格子會顯示稀有度',  grants:'hintRarity' },
+    desc:'圖鑑會顯示每個寶物實際的掉落機率',  grants:'hintOdds' },
   { id:'hunt3',   axis:'hunt',   tier:3, cost:3, icon:'⛏', name:'深掘',
     desc:'解鎖「傳說」級寶物的掉落。沒有這個，它們永遠不會出現。',
     grants:'dropEpic' },

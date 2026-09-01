@@ -1,14 +1,14 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.10.2';
+import * as S from './store.js?v=0.10.3';
 import {
-  TUNING, ITEMS, MILESTONES, HATS,
+  TUNING, ITEMS, MILESTONES, HATS, clampQty,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
   TREASURES, RARITY, SOURCE_LABEL, treasureHow,
   SKILLS, AXES, SP_STEPS, skillPrereq,
-} from './config.js?v=0.10.2';
+} from './config.js?v=0.10.3';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -447,7 +447,9 @@ function panelWardrobe(body) {
   body.append(tabs);
 
   const kind = wardrobeTab;
-  const grid = el('div', 'grid');
+  // 文字按鈕比符號按鈕寬得多，兩者不能共用同一種排法
+  const textKind = kind !== 'hat' && kind !== 'hold';
+  const grid = el('div', 'grid' + (textKind ? ' text' : ''));
   for (const item of SKINS[kind]) {
     const has      = S.ownsSkin(kind, item.id);
     const locked   = S.skinLocked(kind, item.id);
@@ -535,6 +537,83 @@ function panelWardrobe(body) {
 
 /* --- 送人 --- */
 // 從道具列的「送人」進來。挑對象、（帽子）挑款式、（紙條）打字，然後送出。
+// 數量選擇器：兩顆加減按鈕 ＋ 可以直接用鍵盤打數字。
+// 打字時不強行改寫輸入框（打「12」不會在打到「1」就被夾成上限），
+// 只有離開輸入框才校正回可用範圍。
+function qtyPicker(max, onChange) {
+  const wrap = el('div', 'qty');
+  const minus = el('button', 'btn qty-b', '−');
+  const inp   = el('input', 'qty-in');
+  const plus  = el('button', 'btn qty-b', '＋');
+  minus.type = plus.type = 'button';
+  inp.type = 'text'; inp.inputMode = 'numeric'; inp.autocomplete = 'off';
+  inp.setAttribute('aria-label', '數量');
+  let v = 1;
+  const tidy = () => { minus.disabled = v <= 1; plus.disabled = v >= max; onChange(v); };
+  const set = n => { v = clampQty(n, max); inp.value = String(v); tidy(); };
+  minus.onclick = () => set(v - 1);
+  plus.onclick  = () => set(v + 1);
+  inp.oninput = () => { v = clampQty(inp.value.replace(/\D/g, ''), max); tidy(); };
+  inp.onblur  = () => set(v);
+  inp.onkeydown = e => {
+    if (e.key === 'ArrowUp')   { e.preventDefault(); set(v + 1); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); set(v - 1); }
+  };
+  wrap.append(minus, inp, plus);
+  if (max > 1) {
+    const all = el('button', 'btn small', `最多 ${max}`);
+    all.type = 'button';
+    all.onclick = () => set(max);
+    wrap.append(all);
+  }
+  set(1);
+  return { node: wrap, get: () => v };
+}
+
+// 買給自己。先選數量再確認 —— 順便也是一道防手滑的關卡。
+function showBuyPicker(key) {
+  subView = true;
+  const item = ITEMS[key], me = S.state.me;
+  const body = $('sheetBody'); body.innerHTML = '';
+  $('sheetTitle').textContent = `買 ${item.emoji} ${item.name}`;
+
+  const back = el('button', 'btn', '← 回道具');
+  back.onclick = () => { subView = false; renderPanel('items'); };
+  body.append(back);
+
+  const unit = S.itemCost(key);
+  const max  = item.stack ? clampQty(Math.floor(me.fish / Math.max(1, unit))) : 1;
+  body.append(el('p', 'note', `你有 🐟 ${nf(me.fish)}　·　單價 ${nf(unit)} 🐟`));
+  body.append(el('p', 'hint-sm', item.desc));
+
+  if (me.fish < unit) {
+    body.append(el('p', 'empty', '魚不夠，先去壓幾下吧。'));
+    return;
+  }
+
+  const total = el('p', 'qty-total');
+  const buy = el('button', 'btn primary', '');
+  const q = item.stack
+    ? qtyPicker(max, n => {
+        total.textContent = `合計 ${nf(unit * n)} 🐟`;
+        buy.textContent = `買 ${n} 個 · ${nf(unit * n)} 🐟`;
+      })
+    : { node: null, get: () => 1 };
+  if (q.node) { body.append(el('p', 'note', '要幾個？')); body.append(q.node); body.append(total); }
+  else buy.textContent = `買 · ${nf(unit)} 🐟`;
+
+  buy.onclick = async () => {
+    buy.disabled = true;
+    const n = q.get();
+    try {
+      await S.buyForSelf(key, n);
+      toast(`買了 ${item.name} ×${n}`);
+      subView = false; renderPanel('items');
+    } catch (e) { toast(e.message); buy.disabled = false; }
+  };
+  body.append(buy);
+}
+
 function showGivePicker(key, retried) {
   subView = true;
   const item = ITEMS[key], st = S.state;
@@ -573,7 +652,17 @@ function showGivePicker(key, retried) {
   }
 
   const price = S.itemCost(key), unit = item.gold ? ' 🥇' : ' 🐟';
-  if (price > 0) body.append(el('p', 'hint-sm', `送出要 ${price}${unit}`));
+  const bal = item.gold ? st.me.goldfish : st.me.fish;
+  const maxQ = item.stack && price > 0 ? clampQty(Math.floor(bal / price)) : 1;
+  let qty = { get: () => 1 };
+  if (item.stack && price > 0) {
+    const total = el('p', 'qty-total');
+    body.append(el('p', 'note', '要送幾個？'));
+    qty = qtyPicker(maxQ, n => { total.textContent = `合計 ${nf(price * n)}${unit}`; });
+    body.append(qty.node, total);
+  } else if (price > 0) {
+    body.append(el('p', 'hint-sm', `送出要 ${price}${unit}`));
+  }
 
   const list = st.roster.filter(g => g.uid !== st.me.uid);
   if (!list.length) {
@@ -605,8 +694,9 @@ function showGivePicker(key, retried) {
         const extra = {};
         if (item.hat)  extra.hat  = hat;
         if (item.text) extra.text = note.slice(0, TUNING.noteMaxLen);
-        await S.sendItem(g.uid, key, extra);
-        toast(`送出 ${item.emoji} 給 ${who(g.ownerName)}`);
+        const n = qty.get();
+        await S.sendItem(g.uid, key, extra, n);
+        toast(`送出 ${item.emoji}${n > 1 ? ` ×${n}` : ''} 給 ${who(g.ownerName)}`);
         closePanel();
       } catch (e) { toast(e.message); b.disabled = false; }
     };
@@ -620,6 +710,18 @@ function showGivePicker(key, retried) {
 /* --- 圖鑑 --- */
 let dexFilter = 'all', dexDetail = null;
 
+// 這個寶物現在有沒有可能拿到？沒有的話是被哪個技能擋著。
+// 「拿不到」跟「還沒拿到」是兩件事，圖鑑上一定要分得出來 ——
+// 不然你會一直等一個永遠不會掉的東西。
+const gateOf = t => {
+  const need = t.source === 'drop' && RARITY[t.rarity].needs;
+  if (!need || S.grants(need)) return null;
+  return SKILLS.find(s => s.grants === need) || null;
+};
+// 掉落機率要點出「📖 線索」才看得到
+const oddsText = t => (t.source === 'drop' && S.grants('hintOdds'))
+  ? `約 1/${nf(RARITY[t.rarity].odds)}` : '';
+
 // 點任何一格看細節。手機上不能靠滑鼠停留，所以細節一定要點得開，
 // 而且解鎖後要看得到「當初是怎麼拿到的」—— 不然不知不覺解鎖的人一頭霧水。
 function dexDetailView(body, t) {
@@ -632,15 +734,23 @@ function dexDetailView(body, t) {
   head.append(el('div', 'dex-detail-icon' + (has ? '' : ' locked'), has ? t.icon : '❔'));
   head.append(el('div', 'dex-detail-name', has ? t.name : '???'));
   const tags = el('div', 'dex-detail-tags');
-  const showRar = has || S.grants('hintRarity');
-  const rar = el('span', 'dex-rar', showRar ? RARITY[t.rarity].name : '稀有度未知');
-  rar.style.background = showRar ? RARITY[t.rarity].color : 'var(--muted)';
+  const rar = el('span', 'dex-rar', RARITY[t.rarity].name);
+  rar.style.background = RARITY[t.rarity].color;
   tags.append(rar, el('span', 'dex-rar src', SOURCE_LABEL[t.source]));
   head.append(tags);
   body.append(head);
 
-  body.append(el('p', 'note', has ? '怎麼拿到的' : '線索'));
+  const gate = has ? null : gateOf(t);
+  if (gate) {
+    body.append(el('p', 'note', '目前拿不到'));
+    const g = el('p', 'dex-line gated-line');
+    g.textContent = `🔒 要先在探寶軸點出「${gate.icon} ${gate.name}」，這一級的寶物才會開始掉。`;
+    body.append(g);
+  }
+  body.append(el('p', 'note', has ? '怎麼拿到的' : t.source === 'egg' ? '線索' : '取得條件'));
   body.append(el('p', 'dex-line', has ? treasureHow(t) : t.hint));
+  const od = oddsText(t);
+  if (od) body.append(el('p', 'dex-line', `掉落機率 ${od}`));
 
   if (has) {
     body.append(el('p', 'note', '增益'));
@@ -698,20 +808,21 @@ function panelCodex(body) {
   const grid = el('div', 'dex');
   for (const t of list) {
     const has = S.hasTreasure(t.id);
-    const cell = el('div', 'dex-cell ' + (has ? 'got' : 'locked'));
+    const gate = has ? null : gateOf(t);
+    const cell = el('div', 'dex-cell ' + (has ? 'got' : gate ? 'locked gated' : 'locked'));
     if (has) cell.style.borderColor = RARITY[t.rarity].color;
 
-    cell.append(el('div', 'dex-icon', has ? t.icon : '❔'));
+    cell.append(el('div', 'dex-icon', has ? t.icon : gate ? '🔒' : '❔'));
     cell.append(el('div', 'dex-name', has ? t.name : '???'));
 
-    // 還沒拿到的格子預設不透露稀有度，要在探寶軸點出「📖 線索」才看得到
-    const showRar = has || S.grants('hintRarity');
-    const rar = el('span', 'dex-rar', showRar ? RARITY[t.rarity].name : '？');
-    rar.style.background = showRar ? RARITY[t.rarity].color : 'var(--muted)';
+    const rar = el('span', 'dex-rar', RARITY[t.rarity].name);
+    rar.style.background = RARITY[t.rarity].color;
     cell.append(rar);
 
-    // 未解鎖給線索但不給增益 —— 有方向，仍然要自己動手
-    cell.append(el('div', 'dex-sub', has ? buffText(t) : t.hint));
+    // 彩蛋維持隱晦，其他的直接把條件寫出來 ——
+    // 不知不覺解鎖的人才知道自己做了什麼
+    cell.append(el('div', 'dex-sub',
+      has ? buffText(t) : gate ? `需要「${gate.name}」` : [t.hint, oddsText(t)].filter(Boolean).join('\n')));
 
     // 整格可點，手機也用得了
     cell.tabIndex = 0;
@@ -946,12 +1057,7 @@ function panelItems(body) {
     const acts = el('div', 'row-acts');
     if (item.self) {
       const b = el('button', 'btn small', '買給自己');
-      b.onclick = async () => {
-        b.disabled = true;
-        try { await S.buyForSelf(key); toast(`買了 ${item.name}`); }
-        catch (e) { toast(e.message); }
-        renderPanel('items');                      // 不管成敗都重畫，魚的數字才會即時更新
-      };
+      b.onclick = () => showBuyPicker(key);
       acts.append(b);
     }
     if (item.give) {
@@ -994,8 +1100,9 @@ function drawInbox(body) {
                    double:'送你雙倍魚', medal:'頒了金牌給你',
                    magichand:`留了一隻魔法手，幫你壓了 ${m.hits || TUNING.magicHandHits} 下`,
                  }[m.type] || '送了東西';
+    const qtyTag = m.qty > 1 ? ` ×${m.qty}` : '';
     const nm = senderName(m.from, m.fromName);
-    mid.append(el('div', 'row-title', `${nm.now} ${verb}`));
+    mid.append(el('div', 'row-title', `${nm.now} ${verb}${qtyTag}`));
     mid.append(el('div', 'row-sub', [
       m.text ? `「${m.text}」` : '',
       ago(m.at),
