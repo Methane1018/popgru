@@ -141,6 +141,16 @@
   .hat.flat{top:28.9%}
   .hat.stuck{transform:translate(-30%,-30%) rotate(38deg)}
 
+  /* 手持物。錨點取自去背圖的翅膀尖端，稍微往內收一點才不會超出畫面。 */
+  .hold{position:absolute; line-height:1; pointer-events:none;
+        font-size:60px; transform:translate(-50%,-50%) rotate(-16deg)}
+  @supports (font-size:1cqw){ .hold{font-size:15cqw} }
+  /* 翅膀尖在畫布最邊緣（98.7%/95.2%），道具擺在那裡會被切掉，
+     所以往內收到 80%，看起來仍然是「拿在翅膀上」。 */
+  .hold.tall{left:80%; top:52%}
+  .hold.flat{left:80%; top:58%}
+  .hold.stuck{transform:translate(-50%,-10%) rotate(-70deg)}
+
   .last{font-size:12px; color:var(--muted); font-weight:600; min-height:17px; margin-top:2px; text-align:center}
   .hint{font-size:13px; color:var(--muted); font-weight:600; min-height:18px}
 
@@ -192,6 +202,12 @@
   .input{width:100%; font:inherit; font-size:15px; padding:10px 12px; border-radius:12px;
          border:1px solid var(--line); background:var(--bg); color:var(--ink)}
   .grid{display:flex; flex-wrap:wrap; gap:8px; margin:4px 0}
+  /* 裝扮的分類切換 */
+  .tabs{display:flex; gap:6px; flex-wrap:wrap; margin:2px 0 6px}
+  .tab{appearance:none; border:1px solid var(--line); background:var(--card); color:var(--muted);
+       font:inherit; font-size:12.5px; font-weight:700; padding:6px 12px; border-radius:999px;
+       cursor:pointer; line-height:1}
+  .tab.on{background:var(--accent); color:var(--accent-ink); border-color:var(--accent)}
   .emoji-btn{appearance:none; width:52px; height:52px; font-size:26px; line-height:1; cursor:pointer;
              border-radius:14px; border:1px solid var(--line); background:var(--card)}
   .emoji-btn.on{border-color:var(--accent); background:var(--bg-2); box-shadow:0 0 0 2px var(--accent) inset}
@@ -275,6 +291,7 @@
     <img id="imgTall" src="src/penguin-tall-cutout.png" alt="站著的格魯" fetchpriority="high">
     <img id="imgFlat" src="src/penguin-flat-cutout.png" alt="被壓扁的格魯" class="hide" fetchpriority="high">
     <div class="hat tall" id="hat" hidden></div>
+    <div class="hold tall" id="hold" hidden></div>
   </div>
   </div>
 
@@ -292,7 +309,8 @@
 <nav class="nav">
   <button class="btn" id="navHome" type="button" hidden>🏠 回家</button>
   <button class="btn" id="navPeople" type="button">👥 大家</button>
-  <button class="btn" id="navShop" type="button">🎁 商店</button>
+  <button class="btn" id="navItems" type="button">🎁 道具</button>
+  <button class="btn" id="navWardrobe" type="button">🎨 裝扮</button>
   <button class="btn" id="navInbox" type="button">📭</button>
   <button class="btn" id="shareBtn" type="button" hidden>🔗 分享</button>
   <button class="btn" id="sound" type="button" aria-pressed="true">🔊</button>
@@ -318,6 +336,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=0.7.1"></script>
+<script type="module" src="js/app.js?v=0.8.0"></script>
 </body>
 </html>

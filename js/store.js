@@ -8,7 +8,7 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
-} from './config.js?v=0.7.1';
+} from './config.js?v=0.8.0';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -508,6 +508,9 @@ export async function goHome() {
 
 /* --------------------------------------------------------------- squash -- */
 let squashTicks = 0, flushTarget = null;
+// 裝扮增益是百分比，但魚是整數。零頭先累積著，湊滿一條才發，
+// 這樣不會出現 0.5 條魚，長期下來比例也是對的。
+let fishFrac = 0;
 
 export function squash() {
   const me = state.me, v = state.viewing;
@@ -547,6 +550,12 @@ export function squash() {
   const mult = me.double > 0 ? 2 : 1;
   if (me.double > 0) me.double -= 1;
   r.gained = TUNING.fishPerSquash * mult;
+
+  const bonus = cosmeticBonus();          // 持有幾件裝扮就加幾成
+  if (bonus > 0) {
+    fishFrac += r.gained * bonus;
+    if (fishFrac >= 1) { const extra = Math.floor(fishFrac); fishFrac -= extra; r.gained += extra; r.bonusFish = extra; }
+  }
   me.fish += r.gained;
 
   squashTicks += 1;
@@ -745,29 +754,17 @@ export const ownsHat  = e => !!e && state.me.ownedHats.includes(e);
 export const hatLocked = e => hatInfo(e).need > state.global.squashes;
 
 // 解鎖一頂帽子。付一次錢，之後換戴免費。
-export async function buyHat(emoji) {
-  const info = hatInfo(emoji);
-  if (ownsHat(emoji))   throw new Error('已經解鎖過了');
-  if (hatLocked(emoji)) throw new Error(`要小圈子壓到 ${info.need.toLocaleString('en-US')} 下才解得開`);
-  if (state.me.fish < info.cost) throw new Error('魚不夠');
-
-  state.me.fish -= info.cost;
-  state.me.ownedHats = [...state.me.ownedHats, emoji];
-  sync();
-  if (state.mode === 'member' && fb) {
-    const { F } = fb;
-    F.setDoc(userRef(state.me.uid),
-      { fish: F.increment(-info.cost), ownedHats: F.arrayUnion(emoji) }, { merge:true })
-      .catch(e => console.warn('解鎖帽子失敗：', e));
-  } else { saveGuest(); }
-  await setHat(emoji);                       // 解鎖後直接戴上
-}
+// 帽子的解鎖走 buySkin('hat', …)，這裡只留給舊呼叫點用
+export async function buyHat(emoji) { return buySkin('hat', emoji); }
 
 /* ----------------------------------------------------------------- 外觀 -- */
 const skinKey = (kind, id) => `${kind}:${id}`;
 // 預設款（cost 0）視同人人都有
 export const ownsSkin = (kind, id) =>
-  skinInfo(kind, id)?.cost === 0 || state.me.ownedSkins.includes(skinKey(kind, id));
+  skinInfo(kind, id)?.cost === 0
+  || state.me.ownedSkins.includes(skinKey(kind, id))
+  // 帽子在舊版是獨立的 ownedHats，併進外觀系統之後要繼續認得，不能讓人重買
+  || (kind === 'hat' && state.me.ownedHats.includes(id));
 export const skinLocked = (kind, id) => (skinInfo(kind, id)?.need || 0) > state.global.squashes;
 
 export async function buySkin(kind, id) {
@@ -779,18 +776,23 @@ export async function buySkin(kind, id) {
 
   state.me.fish -= info.cost;
   state.me.ownedSkins = [...state.me.ownedSkins, skinKey(kind, id)];
+  if (kind === 'hat') state.me.ownedHats = [...state.me.ownedHats, id];
   sync();
   if (state.mode === 'member' && fb) {
     const { F } = fb;
-    F.setDoc(userRef(state.me.uid),
-      { fish: F.increment(-info.cost), ownedSkins: F.arrayUnion(skinKey(kind, id)) }, { merge:true })
+    const p = { fish: F.increment(-info.cost), ownedSkins: F.arrayUnion(skinKey(kind, id)) };
+    if (kind === 'hat') p.ownedHats = F.arrayUnion(id);   // 舊欄位一起維護，別的裝置才讀得到
+    F.setDoc(userRef(state.me.uid), p, { merge:true })
       .catch(e => console.warn('解鎖外觀失敗：', e));
   } else { saveGuest(); }
   await setSkin(kind, id);
 }
 
 // 換已解鎖的外觀（免費）。外觀存在格魯上，所以來訪的人也會看到。
+// 帽子是特例：它在格魯文件的最上層（gru.hat），不在 skin 裡面 ——
+// 舊資料就是那樣存的，改結構等於要遷移所有人的帽子，不值得。
 export async function setSkin(kind, id) {
+  if (kind === 'hat') return setHat(id === 'none' ? null : id);
   if (!ownsSkin(kind, id)) throw new Error('還沒解鎖這個外觀');
   state.myGru.skin = { ...state.myGru.skin, [kind]: id };
   if (state.viewing.isMine) state.viewing.skin = { ...state.myGru.skin };
@@ -800,6 +802,21 @@ export async function setSkin(kind, id) {
       .catch(e => console.warn('存外觀失敗：', e));
   } else { saveGuest(); }
 }
+
+// 目前戴／拿著什麼。帽子從 gru.hat 讀，其他從 gru.skin 讀。
+export const wornSkin = (gru = state.viewing) => ({
+  ...defaultSkin(), ...(gru.skin || {}), hat: gru.hat || 'none',
+});
+
+// 裝扮增益：看「持有幾件」，不看「配備什麼」。
+// 這樣就不會有人被迫戴著醜帽子只因為它比較強。
+export function cosmeticCount() {
+  const keys = new Set(state.me.ownedSkins);
+  state.me.ownedHats.forEach(h => keys.add(skinKey('hat', h)));   // 舊紀錄也算
+  return keys.size;
+}
+export const cosmeticBonus = () =>
+  Math.min(TUNING.cosmeticCap, cosmeticCount() * TUNING.cosmeticPerItem);
 
 // 換戴已解鎖的帽子（免費），或傳 null 脫掉
 export async function setHat(emoji) {

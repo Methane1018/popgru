@@ -1,12 +1,12 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.7.1';
+import * as S from './store.js?v=0.8.0';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
-} from './config.js?v=0.7.1';
+} from './config.js?v=0.8.0';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -63,22 +63,29 @@ function applySkin(skin) {
   b.style.setProperty('--skin-tile', bg.emoji ? emojiTile(bg.emoji) : 'none');
   b.style.setProperty('--skin-tint', skinInfo('tint', sk.tint).filter || 'none');
   b.dataset.font = skinInfo('font', sk.font).id;
+
+  const hat = sk.hat && sk.hat !== 'none' ? sk.hat : '';
+  hatEl.textContent = hat; hatEl.hidden = !hat;
+  const hold = sk.hold && sk.hold !== 'none' ? sk.hold : '';
+  holdEl.textContent = hold; holdEl.hidden = !hold;
 }
 
 /* ------------------------------------------------------------------ 姿勢 -- */
 const stage = $('stage'), imgTall = $('imgTall'), imgFlat = $('imgFlat'),
-      shadow = $('shadow'), hatEl = $('hat');
+      shadow = $('shadow'), hatEl = $('hat'), holdEl = $('hold');
 // pointerDown 是「手指還壓著嗎」，squashed 是「畫面上扁了嗎」。
 // 這兩件事必須分開：狂點時每一下都要算到，但畫面可以整段維持扁的。
 let pointerDown = false, squashed = false, pressedAt = 0, releaseTimer = null, stuckTimer = null;
 const MIN_SQUASH_MS = 110;
 
-function setPose(flat, hold = false) {
+function setPose(flat, stuck = false) {
   squashed = flat;
   imgTall.classList.toggle('hide',  flat);
   imgFlat.classList.toggle('hide', !flat);
-  shadow.className = 'shadow ' + (flat ? 'flat' : 'tall');
-  hatEl.className  = 'hat '    + (flat ? 'flat' : 'tall') + (hold ? ' stuck' : '');
+  const p = flat ? 'flat' : 'tall';
+  shadow.className = 'shadow ' + p;
+  hatEl.className  = 'hat '    + p + (stuck ? ' stuck' : '');
+  holdEl.className = 'hold '   + p + (stuck ? ' stuck' : '');
 }
 
 /* ------------------------------------------------------------------ 音效 -- */
@@ -257,9 +264,8 @@ function render() {
                             : `${v.ownerName} 的格魯 · 今天幫忙的額度用完了`;
   document.body.classList.toggle('visiting', !v.isMine);
   // 看誰家就套誰的外觀；自己家在試外觀時顯示預覽
-  applySkin(v.isMine && skinPreview ? { ...v.skin, ...skinPreview } : v.skin);
-  hatEl.textContent = v.hat || '';
-  hatEl.hidden = !v.hat;
+  const worn = S.wornSkin(v);
+  applySkin(v.isMine && skinPreview ? { ...worn, ...skinPreview } : worn);
 
   const ls = st.opening.lastSquasher;
   $('lastSquasher').textContent = !ls ? ''
@@ -289,7 +295,7 @@ function render() {
 
   const social = st.mode === 'member';
   $('navPeople').disabled = !social;
-  $('navShop').disabled   = !social;
+  $('navItems').disabled  = !social;   // 裝扮訪客也能玩，資料先存本機
   $('navInbox').disabled  = !social;
   $('shareBtn').hidden    = !social;
 
@@ -327,9 +333,10 @@ $('sheetClose').onclick = closePanel;
 function renderPanel(name) {
   const body = $('sheetBody'); body.innerHTML = '';
   $('sheetTitle').textContent =
-    { people:'大家的格魯', shop:'商店', inbox:'信箱', me:'我的格魯', changelog:'更新內容' }[name] || '';
-  ({ people: panelPeople, shop: panelShop, inbox: panelInbox,
-     me: panelMe, changelog: panelChangelog })[name]?.(body);
+    { people:'大家的格魯', items:'道具', wardrobe:'裝扮', inbox:'信箱',
+      me:'我的格魯', changelog:'更新內容' }[name] || '';
+  ({ people: panelPeople, items: panelItems, wardrobe: panelWardrobe,
+     inbox: panelInbox, me: panelMe, changelog: panelChangelog })[name]?.(body);
 }
 
 /* --- 外觀 --- */
@@ -338,7 +345,7 @@ function renderPanel(name) {
 let skinPreview = null;
 
 function skinPickerState() {
-  const cur = { ...defaultSkin(), ...(S.state.myGru.skin || {}) };
+  const cur = S.wornSkin(S.state.myGru);   // 含帽子與手持物
   const sel = { ...cur, ...(skinPreview || {}) };
   const toBuy = SKIN_KINDS.map(({ k }) => ({ k, id: sel[k] }))
                           .filter(({ k, id }) => !S.ownsSkin(k, id));
@@ -378,105 +385,118 @@ function exitPreview(back = true) {
     document.body.classList.add('sheet-open');
     $('sheet').classList.add('open');
     $('scrim').classList.add('open');
-    showSkinPicker();
+    renderPanel(openPanel);
   }
 }
 
 $('previewVeil').onclick = () => exitPreview();      // 點任何地方都結束
 
-function showSkinPicker() {
-  subView = true;
-  const body = $('sheetBody'); body.innerHTML = '';
-  $('sheetTitle').textContent = '外觀';
+// 裝扮：帽子／手持物／背景／顏色／數字，五類共用同一套流程。
+// 點選只是預覽，要按底下的按鈕才會真的買或換。
+let wardrobeTab = 'hat';
+
+function panelWardrobe(body) {
   const st = S.state;
   const { cur, sel, toBuy, cost, changed } = skinPickerState();
+  const owned = S.cosmeticCount();
+  const bonus = Math.round(S.cosmeticBonus() * 100);
 
+  body.append(el('p', 'note', `🐟 ${nf(st.me.fish)}　·　已收集 ${owned} 件裝扮`));
   body.append(el('p', 'hint-sm',
-    `你有 🐟 ${nf(st.me.fish)}。點一下只是選起來，按「👀 預覽」可以收起商店全畫面看效果，` +
-    `按「購買並使用」才會真的扣錢。外觀掛在格魯身上，朋友來你家就會看到。`));
+    bonus > 0
+      ? `持有裝扮讓你每次壓扁多拿 ${bonus}% 的魚 —— 看的是「擁有幾件」，不是身上穿什麼，所以隨你怎麼搭。`
+      : '買下任何一件裝扮就會開始有微量加成，而且看的是持有量，不是身上穿什麼。'));
 
+  // 分類
+  const tabs = el('div', 'tabs');
   for (const { k, label } of SKIN_KINDS) {
-    body.append(el('p', 'note', label));
-    const grid = el('div', 'grid');
-    for (const item of SKINS[k]) {
-      const owned    = S.ownsSkin(k, item.id);
-      const locked   = S.skinLocked(k, item.id);
-      const selected = sel[k] === item.id;
-      const inUse    = cur[k] === item.id;
-
-      const cell = el('div', 'hat-cell');
-      const b = el('button', 'skin-btn' + (selected ? ' on' : '') + (locked ? ' locked' : ''));
-      b.append(el('span', 'skin-name', item.name));
-      b.title = item.name;
-      if (locked) {
-        b.disabled = true;
-        cell.append(b, el('span', 'hat-need', nf(item.need)));
-      } else {
-        b.onclick = () => {                       // 只預覽，不扣錢
-          skinPreview = { ...(skinPreview || {}), [k]: item.id };
-          applySkin({ ...cur, ...skinPreview });
-          showSkinPicker();
-        };
-        if (!owned && st.me.fish < item.cost) b.classList.add('poor');
-        cell.append(b, el('span', 'hat-need',
-          inUse ? '使用中' : owned ? '已擁有' : `${item.cost} 🐟`));
-      }
-      grid.append(cell);
-    }
-    body.append(grid);
+    const t = el('button', 'tab' + (wardrobeTab === k ? ' on' : ''), label);
+    t.onclick = () => { wardrobeTab = k; renderPanel('wardrobe'); };
+    tabs.append(t);
   }
+  body.append(tabs);
 
-  // ── 底部確認列：真正花錢的地方只有這裡 ──
+  const kind = wardrobeTab;
+  const grid = el('div', 'grid');
+  for (const item of SKINS[kind]) {
+    const has      = S.ownsSkin(kind, item.id);
+    const locked   = S.skinLocked(kind, item.id);
+    const selected = sel[kind] === item.id;
+    const inUse    = cur[kind] === item.id;
+
+    const cell = el('div', 'hat-cell');
+    // 帽子和手持物用符號當按鈕，其他用名字
+    const face = (kind === 'hat' || kind === 'hold')
+      ? (item.id === 'none' ? '🚫' : item.id)
+      : item.name;
+    const b = el('button',
+      (kind === 'hat' || kind === 'hold' ? 'emoji-btn' : 'skin-btn')
+      + (selected ? ' on' : '') + (locked ? ' locked' : ''), face);
+    b.title = item.name;
+
+    if (locked) {
+      b.disabled = true;
+      cell.append(b, el('span', 'hat-need', nf(item.need)));
+    } else {
+      b.onclick = () => {                       // 只預覽，不扣錢
+        skinPreview = { ...(skinPreview || {}), [kind]: item.id };
+        applySkin({ ...cur, ...skinPreview });
+        renderPanel('wardrobe');
+      };
+      if (!has && st.me.fish < item.cost) b.classList.add('poor');
+      cell.append(b, el('span', 'hat-need',
+        inUse ? '使用中' : has ? '已擁有' : `${item.cost} 🐟`));
+    }
+    grid.append(cell);
+  }
+  body.append(grid);
+
+  // 底部確認列：真正花錢的地方只有這裡
   const bar = el('div', 'skin-bar');
   if (!changed) {
-    bar.append(el('span', 'skin-bar-note', '點上面的樣式試看看，這裡會出現購買按鈕'));
+    bar.append(el('span', 'skin-bar-note', '點上面的樣式試看看，這裡會出現預覽和購買按鈕'));
   } else {
     const names = SKIN_KINDS.filter(({ k }) => sel[k] !== cur[k])
                             .map(({ k }) => skinInfo(k, sel[k]).name).join('、');
+    const apply = async () => {
+      for (const { k, id } of toBuy) await S.buySkin(k, id);
+      for (const { k } of SKIN_KINDS) if (sel[k] !== cur[k]) await S.setSkin(k, sel[k]);
+      skinPreview = null;
+      exitPreview(false);
+    };
     if (toBuy.length) {
       const poor = st.me.fish < cost;
-      bar.append(el('span', 'skin-bar-note',
-        `預覽中：${names}　未擁有 ${toBuy.length} 項`));
-      const buy = el('button', 'btn primary' + (poor ? '' : ''), `購買並使用 · ${cost} 🐟`);
+      bar.append(el('span', 'skin-bar-note', `預覽中：${names}　未擁有 ${toBuy.length} 項`));
+      const buy = el('button', 'btn primary', `購買並使用 · ${cost} 🐟`);
       buy.disabled = poor;
       if (poor) buy.title = '魚不夠';
       buy.onclick = async () => {
         buy.disabled = true;
-        try {
-          for (const { k, id } of toBuy) await S.buySkin(k, id);       // 先解鎖
-          for (const { k } of SKIN_KINDS) if (sel[k] !== cur[k]) await S.setSkin(k, sel[k]);
-          skinPreview = null;
-          exitPreview(false);
-          toast(`買下並換上「${names}」`);
-          showSkinPicker();
-        } catch (e) { toast(e.message); buy.disabled = false; }
+        try { await apply(); toast(`買下並換上「${names}」`); renderPanel('wardrobe'); }
+        catch (e) { toast(e.message); buy.disabled = false; }
       };
       bar.append(buy);
     } else {
       bar.append(el('span', 'skin-bar-note', `預覽中：${names}　都已經擁有`));
       const use = el('button', 'btn primary', '換上這一套');
       use.onclick = async () => {
-        try {
-          for (const { k } of SKIN_KINDS) if (sel[k] !== cur[k]) await S.setSkin(k, sel[k]);
-          skinPreview = null;
-          exitPreview(false);
-          toast(`換成「${names}」`);
-          showSkinPicker();
-        } catch (e) { toast(e.message); }
+        try { await apply(); toast(`換成「${names}」`); renderPanel('wardrobe'); }
+        catch (e) { toast(e.message); }
       };
       bar.append(use);
     }
     const look = el('button', 'btn', '👀 預覽');
-    look.title = '把商店收起來，全畫面看效果';
+    look.title = '把面板收起來，全畫面看效果';
     look.onclick = enterPreview;
     bar.append(look);
 
     const undo = el('button', 'btn', '還原');
-    undo.onclick = () => { clearSkinPreview(); showSkinPicker(); };
+    undo.onclick = () => { clearSkinPreview(); renderPanel('wardrobe'); };
     bar.append(undo);
   }
   body.append(bar);
 }
+
 
 /* --- 更新內容 --- */
 function panelChangelog(body) {
@@ -533,46 +553,28 @@ function panelPeople(body) {
 }
 
 /* --- 商店 --- */
-function panelShop(body) {
+function panelItems(body) {
   const me = S.state.me;
   body.append(el('p', 'note', `你有 🐟 ${nf(me.fish)}${me.goldfish ? ` · 🥇 ${me.goldfish} 金魚` : ''}`));
   body.append(el('p', 'hint-sm',
-    `🐟 魚壓一下得一條。🥇 金魚每 ${nf(TUNING.goldfishOdds)} 下才掉一次，只能用來買金牌送人。`));
-
-  // 外觀自己一列，因為它有三大類、價格也不只一種
-  {
-    const row = el('div', 'row');
-    row.append(el('div', 'row-av big', '🎨'));
-    const mid = el('div', 'row-mid');
-    mid.append(el('div', 'row-title', '外觀 · 40〜300 🐟'));
-    mid.append(el('div', 'row-sub', '背景、企鵝顏色、數字樣式。朋友來你家就會看到'));
-    row.append(mid);
-    const acts = el('div', 'row-acts');
-    const b = el('button', 'btn small', '看外觀');
-    b.onclick = showSkinPicker;
-    acts.append(b); row.append(acts);
-    body.append(row);
-  }
+    `🐟 魚壓一下得一條。🥇 金魚每 ${nf(TUNING.goldfishOdds)} 下才掉一次，只能用來買金牌送人。` +
+    `想換造型請按下面的「🎨 裝扮」。`));
 
   for (const [key, item] of Object.entries(ITEMS)) {
     if (key === 'poke') continue;
     const row = el('div', 'row');
     row.append(el('div', 'row-av big', item.emoji));
     const mid = el('div', 'row-mid');
-    mid.append(el('div', 'row-title', item.hat
-      ? `${item.name} · 40〜300 🐟`
-      : `${item.name} · ${item.cost}${item.gold ? ' 🥇' : ' 🐟'}`));
+    mid.append(el('div', 'row-title', `${item.name} · ${item.cost}${item.gold ? ' 🥇' : ' 🐟'}`));
     mid.append(el('div', 'row-sub', item.desc));
     row.append(mid);
 
     const acts = el('div', 'row-acts');
     if (item.self) {
-      const b = el('button', 'btn small', item.hat ? '看帽子' : '買給自己');
+      const b = el('button', 'btn small', '買給自己');
       b.onclick = async () => {
-        try {
-          if (item.hat) return showHatPicker();
-          await S.buyForSelf(key); toast(`買了 ${item.name}`);
-        } catch (e) { toast(e.message); }
+        try { await S.buyForSelf(key); toast(`買了 ${item.name}`); renderPanel('items'); }
+        catch (e) { toast(e.message); }
       };
       acts.append(b);
     }
@@ -586,143 +588,6 @@ function panelShop(body) {
   }
 }
 
-// 帽子是解鎖制：買一次永久擁有，之後換戴免費。
-// 一頂帽子有三種狀態 —— 已解鎖 / 買得起 / 還沒到門檻，畫面要一眼分得出來。
-function showHatPicker() {
-  subView = true;
-  const body = $('sheetBody'); body.innerHTML = '';
-  $('sheetTitle').textContent = '帽子';
-  const st = S.state, worn = st.myGru.hat;
-
-  const owned = HATS.filter(h => S.ownsHat(h.e));
-  const buyable = HATS.filter(h => !S.ownsHat(h.e) && !S.hatLocked(h.e));
-  const locked = HATS.filter(h => !S.ownsHat(h.e) && S.hatLocked(h.e));
-
-  const grid = (list, build) => {
-    const g = el('div', 'grid');
-    list.forEach(h => g.append(build(h)));
-    body.append(g);
-  };
-
-  // ── 已解鎖：直接換戴，不用錢 ──
-  body.append(el('p', 'note', `我的帽子${owned.length ? `（${owned.length} 頂）` : ''}`));
-  if (!owned.length) {
-    body.append(el('p', 'hint-sm', '還沒有任何帽子。買一頂之後就永久擁有，之後想換回來都不用再付錢。'));
-  } else {
-    body.append(el('p', 'hint-sm', '點一下就換戴，已經解鎖的帽子換來換去都免費。'));
-    grid(owned, h => {
-      const cell = el('div', 'hat-cell');
-      const b = el('button', 'emoji-btn' + (worn === h.e ? ' on' : ''), h.e);
-      b.title = h.name;
-      b.onclick = async () => {
-        try { await S.setHat(h.e); toast(`戴上 ${h.e} ${h.name}`); closePanel(); }
-        catch (e) { toast(e.message); }
-      };
-      cell.append(b, el('span', 'hat-need', worn === h.e ? '戴著' : '免費'));
-      return cell;
-    });
-    const off = el('button', 'btn', '不戴帽子');
-    off.onclick = async () => { await S.setHat(null); toast('脫掉了'); closePanel(); };
-    body.append(off);
-  }
-
-  // ── 買得起的 ──
-  if (buyable.length) {
-    body.append(el('p', 'note', '可以解鎖'));
-    body.append(el('p', 'hint-sm', `你有 🐟 ${nf(st.me.fish)}。解鎖一次，之後永久免費換戴。`));
-    grid(buyable, h => {
-      const cell = el('div', 'hat-cell');
-      const b = el('button', 'emoji-btn', h.e);
-      b.title = `${h.name} · ${h.cost} 魚`;
-      if (st.me.fish < h.cost) b.classList.add('poor');
-      b.onclick = async () => {
-        try { await S.buyHat(h.e); toast(`解鎖 ${h.e} ${h.name}，已經戴上`); closePanel(); }
-        catch (e) { toast(e.message); }
-      };
-      cell.append(b, el('span', 'hat-need', `${h.cost} 🐟`));
-      return cell;
-    });
-  }
-
-  // ── 還沒到門檻的 ──
-  if (locked.length) {
-    body.append(el('p', 'note', '還沒解鎖'));
-    body.append(el('p', 'hint-sm',
-      `數字是小圈子要壓到的總數，目前 ${nf(st.global.squashes)} 下。到了之後才買得到。`));
-    grid(locked, h => {
-      const cell = el('div', 'hat-cell');
-      const b = el('button', 'emoji-btn locked', h.e);
-      b.disabled = true; b.title = `${h.name} · ${nf(h.need)} 下解鎖`;
-      cell.append(b, el('span', 'hat-need', nf(h.need)));
-      return cell;
-    });
-  }
-}
-
-function showGivePicker(key, retried) {
-  subView = true;
-  const item = ITEMS[key], st = S.state;
-  const body = $('sheetBody'); body.innerHTML = '';
-  $('sheetTitle').textContent = `送 ${item.emoji} ${item.name} 給誰`;
-
-  let hat = '🎩', note = '';
-  if (item.hat) {
-    const grid = el('div', 'grid');
-    HATS.filter(h => h.need === 0).forEach((h, i) => {
-      const b = el('button', 'emoji-btn' + (i === 0 ? ' on' : ''), h.e);
-      b.title = h.name;
-      b.onclick = () => { hat = h.e;
-        grid.querySelectorAll('.emoji-btn').forEach(x => x.classList.remove('on')); b.classList.add('on'); };
-      grid.append(b);
-    });
-    body.append(el('p', 'note', '選一頂扣在對方頭上'));
-    body.append(el('p', 'hint-sm', '對方會直接戴上，而且永久解鎖，之後想換回來不用付錢。'));
-    body.append(grid);
-  }
-  if (item.text) {
-    const inp = el('input', 'input');
-    inp.maxLength = TUNING.noteMaxLen;
-    inp.placeholder = `想說什麼？${TUNING.noteMaxLen} 字以內`;
-    inp.oninput = () => { note = inp.value; };
-    body.append(inp);
-  }
-
-  const list = st.roster.filter(g => g.uid !== st.me.uid);
-  if (!list.length) {
-    if (!retried) {                       // 名單可能還沒抓過，抓一次再畫
-      body.append(el('p', 'empty', '載入名單中…'));
-      S.loadRoster(true).then(() => { if (openPanel === 'shop') showGivePicker(key, true); });
-    } else {
-      body.append(el('p', 'empty', '還沒有其他人可以送。等朋友登入之後就會出現。'));
-    }
-    return;
-  }
-  for (const g of list) {
-    const row = el('div', 'row');
-    row.append(el('div', 'row-av', g.ownerPhoto ? '' : '🐧'));
-    if (g.ownerPhoto) { const i = new Image(); i.src = g.ownerPhoto; i.alt = ''; row.firstChild.append(i); }
-    const mid = el('div', 'row-mid');
-    mid.append(el('div', 'row-title', g.ownerName || '某人'));
-    mid.append(el('div', 'row-sub', g.name || DEFAULT_GRU_NAME));
-    row.append(mid);
-    const b = el('button', 'btn small primary', '送出');
-    b.onclick = async () => {
-      b.disabled = true;
-      try {
-        const extra = {};
-        if (item.hat)  extra.hat = hat;
-        if (item.text) extra.text = note.slice(0, TUNING.noteMaxLen);
-        await S.sendItem(g.uid, key, extra);
-        toast(`送出 ${item.emoji} 給 ${g.ownerName}`);
-        closePanel();
-      } catch (e) { toast(e.message); b.disabled = false; }
-    };
-    const acts = el('div', 'row-acts');
-    acts.append(b);
-    row.append(acts);
-    body.append(row);
-  }
-}
 
 /* --- 信箱 --- */
 // 同步把目前信箱畫出來；「收下」在背景做，收完再重畫一次。
@@ -820,13 +685,9 @@ function panelMe(body) {
   };
   body.append(save);
 
-  const row2 = el('div', 'row-acts');
-  const hat = el('button', 'btn', '🎩 換帽子');
-  hat.onclick = showHatPicker;
-  const skin = el('button', 'btn', '🎨 換外觀');
-  skin.onclick = showSkinPicker;
-  row2.append(hat, skin);
-  body.append(row2);
+  const skin = el('button', 'btn', '🎨 換裝扮');
+  skin.onclick = () => showPanel('wardrobe');
+  body.append(skin);
 
   if (st.visits.length) {
     body.append(el('h3', 'sub-h', '來過我家的人'));
@@ -847,7 +708,8 @@ function panelMe(body) {
 /* ------------------------------------------------------------------ 導覽 -- */
 $('brand').onclick     = () => showPanel('changelog');
 $('navPeople').onclick = () => { showPanel('people'); S.loadRoster().then(() => refreshPanel('people')); };
-$('navShop').onclick   = () => { showPanel('shop'); S.loadRoster(); };
+$('navItems').onclick    = () => { showPanel('items'); S.loadRoster(); };
+$('navWardrobe').onclick = () => showPanel('wardrobe');
 $('navInbox').onclick  = () => {
   showPanel('inbox');
   // 也要名單才查得到寄件人現在的名字

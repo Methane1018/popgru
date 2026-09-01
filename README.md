@@ -22,6 +22,11 @@ src/penguin-flat-original.jpg     原始照片
 
 ---
 
+## 文件
+
+- [docs/ROADMAP.md](docs/ROADMAP.md) —— 開發計畫、已定案的設計原則、需要美術的規格
+- [docs/DEVLOG.md](docs/DEVLOG.md) —— 踩過的坑與根因，每條在 `check.mjs` 都有對應檢查
+
 ## 發新版
 
 版本號的來源是 `js/config.js` 的 `CHANGELOG`，**最上面那筆就是目前版本**。

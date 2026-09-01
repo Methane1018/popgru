@@ -26,6 +26,13 @@ export const firebaseConfig = {
 //  （順序是刻意的：不寫更新內容就升不了版。）
 // ----------------------------------------------------------------------------
 export const CHANGELOG = [
+  { v:'0.8.0', date:'2026-08-31', notes:[
+    '商店拆成「🎁 道具」和「🎨 裝扮」兩個按鈕',
+    '格魯可以拿東西了：水槍、斧頭、平底鍋、麥克風、球棒、珍奶等 11 種',
+    '裝扮全部整合在一個面板，分成帽子／手持物／背景／顏色／數字五類',
+    '持有裝扮會有微量加成：每擁有一件，壓扁多拿 0.5% 的魚（上限 30%）',
+    '加成看的是「擁有幾件」而不是「身上穿什麼」，所以隨你怎麼搭都不吃虧',
+  ]},
   { v:'0.7.1', date:'2026-08-31', notes:[
     '修好暱稱別人看不到：每次登入或重整都會把暱稱蓋回 Google 帳號的名字',
     '被蓋掉的人重新設一次暱稱就會固定住了',
@@ -128,6 +135,11 @@ export const TUNING = {
   flushMs:        20000,   // 定時批次寫入的間隔（保底）
   quietFlushMs:    6000,   // 停手多久之後寫出去
   listTtlMs:      90000,   // 名單／信箱／足跡的快取時間，這段時間內重開面板不會再查
+
+  // 裝扮的增益看「持有」不看「配備」，所以不會有人被迫戴醜帽子。
+  // 每件很小，靠數量累積；設上限免得收集完的人跟新人差太多。
+  cosmeticPerItem: 0.005,  // 每擁有一件裝扮，魚 +0.5%
+  cosmeticCap:     0.30,   // 最多 +30%
   maxPerFlush:     2000,   // 單次批次上限，規則層擋 5000
   goldfishOdds:    500,    // 每 N 次計分，有一次企鵝彈不回來並掉一條金魚
   doubleClicks:    100,    // 雙倍魚卡生效幾次點擊
@@ -155,7 +167,7 @@ export const ITEMS = {
   note:   { emoji:'💌', name:'紙條',     cost:  8, give:true, text:true, desc:'留一句話，30 字以內' },
   fish:   { emoji:'🐟', name:'送魚',     cost: 25, give:true, gives:20,  desc:'對方收到 20 條魚（虧本，但是心意）' },
   freeze: { emoji:'🧊', name:'凍結卡',   cost: 60, give:true, self:true, desc:'漏掉一天時自動用掉，保住連續天數' },
-  hat:    { emoji:'🎩', name:'帽子',     cost: 60, give:true, self:true, hat:true, desc:'解鎖後可以隨時免費換戴，送人也會幫對方解鎖' },
+  hat:    { emoji:'🎩', name:'帽子',     cost: 60, give:true, hat:true, desc:'送一頂帽子給朋友，他會直接戴上而且永久解鎖' },
   double: { emoji:'⚡', name:'雙倍魚',   cost: 80, give:true, self:true, desc:'接下來 100 下拿雙倍魚（不影響每日上限）' },
   medal:  { emoji:'🏅', name:'金牌',     cost:  1, give:true, gold:true, desc:'用金魚買，永久掛在對方名字旁邊' },
 };
@@ -185,6 +197,23 @@ export const HATS = [
   { e:'💎', cost: 300, need: 1000000, name:'鑽石' },
 ];
 export const hatInfo = e => HATS.find(h => h.e === e) || { e, cost: 60, need: 0, name: '帽子' };
+
+// 手持物。錨點取自去背圖的翅膀尖端，兩個姿勢都會自動跟著移動。
+// 先用 emoji 起手；之後換成手繪圖只是換一個圖層來源，結構不用動。
+export const HOLD = [
+  { id:'none', name:'空手',   cost:  0, need:      0 },
+  { id:'🔫',   name:'水槍',   cost: 90, need:      0 },
+  { id:'🪓',   name:'斧頭',   cost: 90, need:      0 },
+  { id:'🍳',   name:'平底鍋', cost: 90, need:      0 },
+  { id:'🎤',   name:'麥克風', cost: 90, need:      0 },
+  { id:'🏏',   name:'球棒',   cost: 90, need:      0 },
+  { id:'🌭',   name:'熱狗',   cost: 70, need:      0 },
+  { id:'🧋',   name:'珍奶',   cost: 70, need:      0 },
+  { id:'🗡',   name:'劍',     cost:150, need:   5000 },
+  { id:'🔦',   name:'手電筒', cost:150, need:  25000 },
+  { id:'🪄',   name:'魔杖',   cost:200, need: 100000 },
+  { id:'⚡️',   name:'閃電',   cost:250, need: 250000 },
+];
 
 // ----------------------------------------------------------------------------
 //  外觀。跟帽子一樣是買一次永久解鎖，之後換來換去免費。
@@ -225,7 +254,15 @@ export const SKINS = {
   ],
 };
 
+// 帽子和手持物也併進來，五類共用同一套「解鎖 / 預覽 / 換裝」流程
+// 「不戴」也要是一個正式選項（免費），不然換裝流程會把它當成沒解鎖的東西
+SKINS.hat  = [{ id:'none', name:'不戴', cost:0, need:0 },
+              ...HATS.map(h => ({ id:h.e, name:h.name, cost:h.cost, need:h.need }))];
+SKINS.hold = HOLD;
+
 export const SKIN_KINDS = [
+  { k:'hat',  label:'帽子' },
+  { k:'hold', label:'手持物' },
   { k:'bg',   label:'背景' },
   { k:'tint', label:'企鵝顏色' },
   { k:'font', label:'數字樣式' },
@@ -233,4 +270,5 @@ export const SKIN_KINDS = [
 export const skinInfo = (kind, id) =>
   (SKINS[kind] || []).find(x => x.id === id) || (SKINS[kind] || [])[0];
 export const defaultSkin = () =>
-  ({ bg:SKINS.bg[0].id, tint:SKINS.tint[0].id, font:SKINS.font[0].id });
+  ({ bg:SKINS.bg[0].id, tint:SKINS.tint[0].id, font:SKINS.font[0].id,
+     hold:'none', hat:'none' });
