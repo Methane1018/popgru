@@ -9,6 +9,7 @@ import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
   TREASURES, RARITY, treasureInfo, SKINS,
+  SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
 } from './config.js?v=0.9.3';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
@@ -60,7 +61,7 @@ const blankMe = () => ({
   uid:null, name:null, googleName:null, nick:null, photo:null,
   lifetime:0, fish:0, goldfish:0, medals:0, freezes:0, double:0,
   ownedHats:[], ownedSkins:[], loaded:false,
-  treasures:[], helped:{}, giftsReceived:0,
+  treasures:[], skills:[], helped:{}, giftsReceived:0,
   streak:0, bestStreak:0, lastDay:null, todayCount:0, helpToday:0, helpDay:null,
 });
 const blankGru = () => ({
@@ -110,6 +111,7 @@ function saveGuest() {
     localStorage.setItem(GUEST_KEY, JSON.stringify({
       lifetime, fish, goldfish, streak, bestStreak, lastDay, todayCount, nick, ownedHats,
       ownedSkins: state.me.ownedSkins,
+      treasures: state.me.treasures, skills: state.me.skills,
       gruName: state.myGru.name, gruHat: state.myGru.hat, gruSquashes: state.myGru.squashes,
       gruSkin: state.myGru.skin,
     }));
@@ -124,6 +126,8 @@ function applyGuest() {
     nick:g.nick||null, name:g.nick||null,
     ownedHats: Array.isArray(g.ownedHats) ? g.ownedHats : [],
     ownedSkins: Array.isArray(g.ownedSkins) ? g.ownedSkins : [],
+    treasures: Array.isArray(g.treasures) ? g.treasures : [],
+    skills:    Array.isArray(g.skills)    ? g.skills    : [],
   });
   Object.assign(state.myGru, blankGru(), {
     name:g.gruName||DEFAULT_GRU_NAME, hat:g.gruHat||null, squashes:g.gruSquashes||0,
@@ -180,7 +184,7 @@ function outboxSettle(uid, target, n, fish, gold) {
 // 前段是「絕對值」欄位（只有這台裝置在寫，遺失就回不來）；
 // 後段是顯示用的數字，載入時先拿來墊著，免得畫面閃一下 0 再跳回真值。
 const MIRROR_FIELDS = ['streak','bestStreak','lastDay','todayCount','helpToday','helpDay','freezes','double'];
-const MIRROR_DISPLAY = ['lifetime','fish','goldfish','medals','treasures'];
+const MIRROR_DISPLAY = ['lifetime','fish','goldfish','medals','treasures','skills'];
 const MIRROR_ALL = [...MIRROR_FIELDS, ...MIRROR_DISPLAY];
 
 function mirrorSave() {
@@ -356,6 +360,7 @@ async function onSignedIn(user) {
       ])),
       ownedSkins: Array.isArray(d.ownedSkins) ? d.ownedSkins : [],
       treasures: Array.isArray(d.treasures) ? d.treasures : [],
+      skills:    Array.isArray(d.skills)    ? d.skills    : [],
       helped: (d.helped && typeof d.helped === 'object') ? d.helped : {},
       giftsReceived: d.giftsReceived || 0,
       nick: realName(d.nick),
@@ -850,10 +855,65 @@ export function buffOf(kind) {
     const t = treasureInfo(id);
     if (t && t.buff.kind === kind) v += t.buff.value;
   }
+  // 技能跟寶物共用同一套 kind，所以學到的效果直接疊上去，
+  // 不用在每個用到 buffOf() 的地方各加一次。
+  for (const id of state.me.skills || []) {
+    const s = skillInfo(id);
+    if (s && s.buff && s.buff.kind === kind) v += s.buff.value;
+  }
   return v;
 }
 
 export const helpedCount = () => Object.keys(state.me.helped || {}).length;
+
+/* --------------------------------------------------------------- 技能樹 -- */
+// 技能點總數完全由 lifetime 推導出來，資料庫只存「學會了哪些」。
+// 算得出來的東西就不要儲存 —— 沒有計數器，就沒有被快照覆蓋而回滾的機會。
+// （v0.9 之前連勝歸零、幫忙額度跳回 300，全都是絕對值欄位被覆蓋造成的。）
+export const spTotal = () => {
+  const n = state.me.lifetime || 0;
+  return SP_STEPS.filter(x => n >= x).length
+       + MILESTONES.filter(m => n >= m.at).length;
+};
+export const spSpent = () =>
+  (state.me.skills || []).reduce((n, id) => n + (skillInfo(id)?.cost || 0), 0);
+export const spLeft  = () => Math.max(0, spTotal() - spSpent());
+
+export const hasSkill = id => (state.me.skills || []).includes(id);
+export const axisDone = axis => SKILLS.filter(s => s.axis === axis).every(s => hasSkill(s.id));
+
+// 有沒有解鎖某個「權限」（不是數值的那種效果）
+export const grants = key =>
+  (state.me.skills || []).some(id => skillInfo(id)?.grants === key);
+
+// 學不學得起。可以就回 null，不行就回一句能直接顯示給人看的原因。
+export function skillBlock(id) {
+  const sk = skillInfo(id);
+  if (!sk) return '沒有這個技能';
+  if (hasSkill(id)) return '已經學會了';
+  const pre = skillPrereq(sk);
+  if (pre && !hasSkill(pre)) return `要先學「${skillInfo(pre).name}」`;
+  const short = sk.cost - spLeft();
+  if (short > 0) return `技能點不夠，還差 ${short} 點`;
+  return null;
+}
+export const canLearn = id => !skillBlock(id);
+
+// 學會一個技能。跟寶物一樣用 arrayUnion，重複呼叫沒有副作用。
+// 不做洗點：選擇有重量才有意義。
+export function learnSkill(id) {
+  const why = skillBlock(id);
+  if (why) throw new Error(why);
+  state.me.skills = [...(state.me.skills || []), id];
+  if (state.mode === 'member' && fb) {
+    queuePatch({ skills: fb.F.arrayUnion(id) });
+    scheduleFlush();
+  } else { saveGuest(); }
+  checkAchievements();            // 點滿一整條軸會拿到 🌳 專精
+  sync();
+  emit('skill', skillInfo(id));
+  return skillInfo(id);
+}
 
 // 道具的實際價格。畫面和扣款都走這裡，兩邊才不會講不一樣的數字。
 //   🧊 碎冰  → 凍結卡打折
@@ -906,6 +966,7 @@ const ACHIEVE = {
   mt100k:  () => state.global.squashes >= 100000,
   stylish: () => cosmeticCount() >= 10,
   hatlove: () => SKINS.hat.filter(h => h.cost > 0).every(h => ownsSkin('hat', h.id)),
+  master:  () => Object.keys(AXES).some(a => axisDone(a)),
 };
 
 // 回傳這次新解鎖的清單。上線當下大家會一次達成好幾個，所以呼叫端要合併通知。
@@ -925,6 +986,9 @@ function rollTreasure() {
   const mult = 1 + buffOf('drop');
   const pool = TREASURES
     .filter(t => t.source === 'drop' && !hasTreasure(t.id))
+    // 傳說與神話要先在探寶軸點出權限，沒點就根本不在池子裡。
+    // 「看得到但還拿不到」是技能樹的重點，不是漏掉的判斷。
+    .filter(t => !RARITY[t.rarity].needs || grants(RARITY[t.rarity].needs))
     .sort((a, b) => RARITY[b.rarity].odds - RARITY[a.rarity].odds);
   for (const t of pool) {
     if (Math.random() < mult / RARITY[t.rarity].odds) return t;

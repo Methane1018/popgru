@@ -168,6 +168,10 @@ export const TUNING = {
   rosterSize:      50,     // 名單一次抓幾個人（10 人的圈子等於全員）
   pokeCooldownMs:  60000,  // 同一個人多久才能再戳一次
   idleStopMs:      0,      // 0 = 只要分頁切到背景就停止計分
+
+  // ── 技能樹 ──
+  autopressMs:  1400,      // 自動液壓機每幾毫秒壓一下（只在分頁看得見時）
+  magicHandHits:  60,      // 魔法手一次幫朋友壓幾下
 };
 
 // 共同里程碑：全圈總壓扁數達標時，所有人一起解鎖
@@ -197,73 +201,90 @@ export const MILESTONES = [
 //    freezeOff / giftOff   凍結卡 / 道具打折（比例）
 // ----------------------------------------------------------------------------
 export const RARITY = {
-  common: { name:'常見', odds: 300,   color:'#7d8f9c' },
-  rare:   { name:'稀有', odds: 2000,  color:'#2f7fd0' },
-  epic:   { name:'傳說', odds: 20000, color:'#a457d8' },
+  // odds 是機率分母：每次計分有 1/odds 的機會掉這一級的某個寶物。
+  // 傳說與神話要先在探寶軸點出權限才會進掉落池 —— 那個「還不行」就是深度。
+  common:   { name:'一般', odds:   300, color:'#8b9aa5' },
+  uncommon: { name:'少見', odds:   900, color:'#3fa45b' },
+  rare:     { name:'稀有', odds:  2600, color:'#2f7fd0' },
+  epic:     { name:'傳說', odds:  9000, color:'#a457d8', needs:'dropEpic' },
+  myth:     { name:'神話', odds: 30000, color:'#d8a020', needs:'dropMyth' },
 };
 
-export const TREASURES = [
-  // ── 機率掉落 8 ──
-  { id:'sweat',   icon:'💦', name:'汗珠',     rarity:'common', source:'drop',
-    hint:'壓著壓著就會掉',            buff:{ kind:'fish', value:0.02 } },
-  { id:'down',    icon:'🪶', name:'絨毛',     rarity:'common', source:'drop',
-    hint:'壓著壓著就會掉',            buff:{ kind:'drop', value:0.20 } },
-  { id:'shard',   icon:'🧊', name:'碎冰',     rarity:'common', source:'drop',
-    hint:'壓著壓著就會掉',            buff:{ kind:'freezeOff', value:0.30 } },
-  { id:'shell',   icon:'🐚', name:'貝殼',     rarity:'rare',   source:'drop',
-    hint:'比較難掉的那種',            buff:{ kind:'fish', value:0.05 } },
-  { id:'orb',     icon:'🔮', name:'水晶球',   rarity:'rare',   source:'drop',
-    hint:'比較難掉的那種',            buff:{ kind:'gold', value:0.20 } },
-  { id:'compass', icon:'🧭', name:'羅盤',     rarity:'rare',   source:'drop',
-    hint:'比較難掉的那種',            buff:{ kind:'help', value:50 } },
-  { id:'crown',   icon:'👑', name:'王冠碎片', rarity:'epic',   source:'drop',
-    hint:'幾乎不會掉的那種',          buff:{ kind:'fish', value:0.08 } },
-  { id:'stardust',icon:'🌌', name:'星塵',     rarity:'epic',   source:'drop',
-    hint:'幾乎不會掉的那種',          buff:{ kind:'double', value:50 } },
+export const RARITY_ORDER = ['common','uncommon','rare','epic','myth'];
 
-  // ── 成就 10 ──
-  { id:'first',   icon:'🥚', name:'第一下',   rarity:'common', source:'achieve',
+export const TREASURES = [
+  // ── 機率掉落 11 ──
+  { id:'sweat',   icon:'💦', name:'汗珠',     rarity:'common',   source:'drop',
+    hint:'壓著壓著就會掉',            buff:{ kind:'fish', value:0.02 } },
+  { id:'down',    icon:'🪶', name:'絨毛',     rarity:'common',   source:'drop',
+    hint:'壓著壓著就會掉',            buff:{ kind:'drop', value:0.20 } },
+  { id:'shard',   icon:'🧊', name:'碎冰',     rarity:'common',   source:'drop',
+    hint:'壓著壓著就會掉',            buff:{ kind:'freezeOff', value:0.30 } },
+  { id:'shell',   icon:'🐚', name:'貝殼',     rarity:'uncommon', source:'drop',
+    hint:'要壓久一點才看得到',        buff:{ kind:'fish', value:0.05 } },
+  { id:'orb',     icon:'🔮', name:'水晶球',   rarity:'uncommon', source:'drop',
+    hint:'要壓久一點才看得到',        buff:{ kind:'gold', value:0.20 } },
+  { id:'compass', icon:'🧭', name:'羅盤',     rarity:'uncommon', source:'drop',
+    hint:'要壓久一點才看得到',        buff:{ kind:'help', value:50 } },
+  { id:'crown',   icon:'👑', name:'王冠碎片', rarity:'rare',     source:'drop',
+    hint:'比較難掉的那種',            buff:{ kind:'fish', value:0.08 } },
+  { id:'quill',   icon:'🖋', name:'冰筆',     rarity:'rare',     source:'drop',
+    hint:'比較難掉的那種',            buff:{ kind:'giftOff', value:0.08 } },
+  { id:'stardust',icon:'🌌', name:'星塵',     rarity:'epic',     source:'drop',
+    hint:'挖得夠深才見得到',          buff:{ kind:'double', value:50 } },
+  { id:'aurora',  icon:'🌠', name:'極光',     rarity:'epic',     source:'drop',
+    hint:'挖得夠深才見得到',          buff:{ kind:'gold', value:0.30 } },
+  { id:'core',    icon:'🌟', name:'格魯之心', rarity:'myth',     source:'drop',
+    hint:'據說它一直都在，只是沒人看得見', buff:{ kind:'fish', value:0.15 } },
+
+  // ── 成就 11 ──
+  { id:'first',   icon:'🥚', name:'第一下',   rarity:'common',   source:'achieve',
     hint:'壓下你的第一下',            buff:{ kind:'fish', value:0.01 } },
-  { id:'k1',      icon:'🏃', name:'千錘百鍊', rarity:'common', source:'achieve',
+  { id:'k1',      icon:'🏃', name:'千錘百鍊', rarity:'common',   source:'achieve',
     hint:'自己累計壓滿 1,000 下',      buff:{ kind:'fish', value:0.03 } },
-  { id:'week',    icon:'🔥', name:'一週皆勤', rarity:'rare',   source:'achieve',
-    hint:'連續 7 天都有來',            buff:{ kind:'help', value:30 } },
-  { id:'month',   icon:'📅', name:'一月不輟', rarity:'epic',   source:'achieve',
-    hint:'連續 30 天都有來',           buff:{ kind:'fish', value:0.06 } },
-  { id:'nb3',     icon:'🤝', name:'好鄰居',   rarity:'common', source:'achieve',
+  { id:'nb3',     icon:'🤝', name:'好鄰居',   rarity:'common',   source:'achieve',
     hint:'幫過 3 個不同的人',          buff:{ kind:'help', value:40 } },
-  { id:'nb5',     icon:'🏘', name:'街坊',     rarity:'rare',   source:'achieve',
-    hint:'幫過 5 個不同的人',          buff:{ kind:'fish', value:0.04 } },
-  { id:'loved',   icon:'🎁', name:'人緣',     rarity:'rare',   source:'achieve',
-    hint:'收到 10 樣別人送的東西',      buff:{ kind:'giftOff', value:0.10 } },
-  { id:'mt100k',  icon:'🗻', name:'十萬大山', rarity:'epic',   source:'achieve',
-    hint:'小圈子總數突破十萬',          buff:{ kind:'fish', value:0.05 } },
-  { id:'stylish', icon:'🎨', name:'有型',     rarity:'common', source:'achieve',
+  { id:'stylish', icon:'🎨', name:'有型',     rarity:'common',   source:'achieve',
     hint:'擁有 10 件裝扮',             buff:{ kind:'drop', value:0.15 } },
-  { id:'hatlove', icon:'🎩', name:'帽癡',     rarity:'epic',   source:'achieve',
+  { id:'week',    icon:'🔥', name:'一週皆勤', rarity:'uncommon', source:'achieve',
+    hint:'連續 7 天都有來',            buff:{ kind:'help', value:30 } },
+  { id:'nb5',     icon:'🏘', name:'街坊',     rarity:'uncommon', source:'achieve',
+    hint:'幫過 5 個不同的人',          buff:{ kind:'fish', value:0.04 } },
+  { id:'loved',   icon:'🎁', name:'人緣',     rarity:'uncommon', source:'achieve',
+    hint:'收到 10 樣別人送的東西',      buff:{ kind:'giftOff', value:0.10 } },
+  { id:'month',   icon:'📅', name:'一月不輟', rarity:'rare',     source:'achieve',
+    hint:'連續 30 天都有來',           buff:{ kind:'fish', value:0.06 } },
+  { id:'mt100k',  icon:'🗻', name:'十萬大山', rarity:'rare',     source:'achieve',
+    hint:'小圈子總數突破十萬',          buff:{ kind:'fish', value:0.05 } },
+  { id:'hatlove', icon:'🎩', name:'帽癡',     rarity:'epic',     source:'achieve',
     hint:'集滿所有帽子',               buff:{ kind:'fish', value:0.05 } },
+  { id:'master',  icon:'🌳', name:'專精',     rarity:'myth',     source:'achieve',
+    hint:'把一條路走到底',
+    how:'把任何一條技能軸的四個技能全部學會',    buff:{ kind:'fish', value:0.10 } },
 
   // ── 彩蛋 4 ──
   // 彩蛋的 hint 是「還沒拿到時」看到的，要隱晦；
   // how 是「拿到之後」才揭曉的真正做法 —— 不然不知不覺解鎖的人不知道發生了什麼。
-  { id:'oclock',  icon:'🕛', name:'準時',     rarity:'rare',   source:'egg',
-    hint:'分針歸零的那一刻',
-    how:'在整點過後的那一分鐘之內壓一下',        buff:{ kind:'gold', value:0.10 } },
-  { id:'tickle',  icon:'🦶', name:'搔癢',     rarity:'rare',   source:'egg',
-    hint:'別老是打頭',
-    how:'連續戳格魯的腳 10 下',                  buff:{ kind:'fish', value:0.03 } },
-  { id:'curious', icon:'🔢', name:'好奇心',   rarity:'common', source:'egg',
+  { id:'curious', icon:'🔢', name:'好奇心',   rarity:'common',   source:'egg',
     hint:'有些數字禁不起反覆敲打',
     how:'快速連點左上角的版本號 5 下',           buff:{ kind:'drop', value:0.10 } },
-  { id:'combo',   icon:'🔁', name:'一鏡到底', rarity:'epic',   source:'egg',
+  { id:'oclock',  icon:'🕛', name:'準時',     rarity:'uncommon', source:'egg',
+    hint:'分針歸零的那一刻',
+    how:'在整點過後的那一分鐘之內壓一下',        buff:{ kind:'gold', value:0.10 } },
+  { id:'tickle',  icon:'🦶', name:'搔癢',     rarity:'uncommon', source:'egg',
+    hint:'別老是打頭',
+    how:'連續戳格魯的腳 10 下',                  buff:{ kind:'fish', value:0.03 } },
+  { id:'combo',   icon:'🔁', name:'一鏡到底', rarity:'epic',     source:'egg',
     hint:'別停下來',
     how:'一口氣壓 100 下，中間不能停超過 2 秒',   buff:{ kind:'double', value:30 } },
 
-  // ── 商店（用金魚買）2 ──
-  { id:'trophy',  icon:'🏆', name:'獎盃',     rarity:'rare',   source:'shop', gold:5,
+  // ── 商店（用金魚買）3 ──
+  { id:'trophy',  icon:'🏆', name:'獎盃',     rarity:'uncommon', source:'shop', gold:5,
     hint:'商店裡用金魚換',              buff:{ kind:'fish', value:0.05 } },
-  { id:'gem',     icon:'💎', name:'原石',     rarity:'epic',   source:'shop', gold:12,
+  { id:'gem',     icon:'💎', name:'原石',     rarity:'rare',     source:'shop', gold:12,
     hint:'商店裡用金魚換',              buff:{ kind:'drop', value:0.30 } },
+  { id:'monolith',icon:'🗿', name:'石像',     rarity:'myth',     source:'shop', gold:40,
+    hint:'商店最深處那個很貴的東西',     buff:{ kind:'fish', value:0.12 } },
 ];
 
 export const SOURCE_LABEL = { drop:'掉落', achieve:'成就', egg:'彩蛋', shop:'商店' };
@@ -383,3 +404,65 @@ export const skinInfo = (kind, id) =>
 export const defaultSkin = () =>
   ({ bg:SKINS.bg[0].id, tint:SKINS.tint[0].id, font:SKINS.font[0].id,
      hold:'none', hat:'none' });
+
+
+/* ------------------------------------------------------------- 技能樹 -- */
+/* 詳細設計理由見 docs/SKILLTREE.md。
+   一句話版本：技能點總數由 lifetime 推導，資料庫只存「學會了哪些」，
+   所以沒有需要同步的計數器，也就沒有回滾 bug。                              */
+
+export const AXES = {
+  press:  { name:'壓製', icon:'🔨', color:'#d06a2f', blurb:'把每一下壓得更值錢' },
+  social: { name:'社交', icon:'🤝', color:'#2f7fd0', blurb:'跟朋友之間能做的事' },
+  hunt:   { name:'探寶', icon:'🔍', color:'#a457d8', blurb:'找到更稀有的東西' },
+};
+
+// 每通過一個門檻（個人累計壓製）就 +1 技能點。里程碑另外再各 +1。
+// 全部點滿要 33 點，而這裡最多給 17 + 7 = 24 —— 點不滿是故意的，
+// 這樣「要走哪條路」才是一個真的選擇。
+export const SP_STEPS = [
+  500, 1500, 3000, 6000, 10000, 15000, 25000, 40000, 60000,
+  90000, 130000, 180000, 250000, 350000, 500000, 700000, 1000000,
+];
+
+// buff 的 kind 跟寶物共用同一套，所以效果會自動疊加進 buffOf()。
+// grants 則是「權限」而不是數值 —— 那是後期解鎖真正的味道。
+export const SKILLS = [
+  { id:'press1',  axis:'press',  tier:1, cost:1, icon:'💪', name:'熟練',
+    desc:'每次計分多 10% 的魚',          buff:{ kind:'fish', value:0.10 } },
+  { id:'press2',  axis:'press',  tier:2, cost:2, icon:'🪨', name:'重壓',
+    desc:'金魚出現的機率提高 25%',        buff:{ kind:'gold', value:0.25 } },
+  { id:'press3',  axis:'press',  tier:3, cost:3, icon:'⚡', name:'連壓',
+    desc:'每次計分再多 20% 的魚',         buff:{ kind:'fish', value:0.20 } },
+  { id:'press4',  axis:'press',  tier:4, cost:5, icon:'🏗', name:'自動液壓機',
+    desc:'開著這一頁的時候，你家的格魯會自己被壓。切到別的分頁就會停。',
+    grants:'autopress' },
+
+  { id:'social1', axis:'social', tier:1, cost:1, icon:'☕', name:'熱心',
+    desc:'每天幫別人的額度 +100',         buff:{ kind:'help', value:100 } },
+  { id:'social2', axis:'social', tier:2, cost:2, icon:'🎀', name:'順手禮',
+    desc:'送人的東西便宜 15%',            buff:{ kind:'giftOff', value:0.15 } },
+  { id:'social3', axis:'social', tier:3, cost:3, icon:'🚪', name:'常客',
+    desc:'每天幫別人的額度再 +200',        buff:{ kind:'help', value:200 } },
+  { id:'social4', axis:'social', tier:4, cost:5, icon:'👋', name:'魔法手',
+    desc:'每天可以在一位朋友家留下一隻手，直接幫壓 60 下，而且不算你的額度。',
+    grants:'magichand' },
+
+  { id:'hunt1',   axis:'hunt',   tier:1, cost:1, icon:'👀', name:'眼尖',
+    desc:'寶物掉落機率 +30%',            buff:{ kind:'drop', value:0.30 } },
+  { id:'hunt2',   axis:'hunt',   tier:2, cost:2, icon:'📖', name:'線索',
+    desc:'圖鑑裡還沒拿到的格子會顯示稀有度',  grants:'hintRarity' },
+  { id:'hunt3',   axis:'hunt',   tier:3, cost:3, icon:'⛏', name:'深掘',
+    desc:'解鎖「傳說」級寶物的掉落。沒有這個，它們永遠不會出現。',
+    grants:'dropEpic' },
+  { id:'hunt4',   axis:'hunt',   tier:4, cost:5, icon:'🔆', name:'神話之眼',
+    desc:'解鎖「神話」級寶物的掉落。整個小圈子最深的地方。',
+    grants:'dropMyth' },
+];
+
+export const skillInfo = id => SKILLS.find(s => s.id === id) || null;
+
+// 同一軸要照順序點：第 N 層要先有第 N−1 層。
+export const skillPrereq = sk =>
+  sk.tier === 1 ? null
+  : (SKILLS.find(s => s.axis === sk.axis && s.tier === sk.tier - 1)?.id || null);

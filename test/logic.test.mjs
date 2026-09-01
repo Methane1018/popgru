@@ -7,6 +7,14 @@ globalThis.localStorage = {
   clear: () => mem.clear(),
 };
 
+// 寶物掉落是整包程式裡唯一用到亂數的地方。不把它固定住，
+// 「壓 50 下應該有 50 條魚」這種測試就有大約四成機率
+// 因為隨機掉到一個帶魚增益的寶物而變紅 ——
+// 這正是它偶爾會失敗、卻怎麼也重現不出來的原因。
+let RND = 1;                          // 1 = 永遠不掉寶；要測掉落時再調低
+const setRandom = v => { RND = v; };
+Math.random = () => RND;
+
 const S = await import('../js/store.js');
 const { TUNING } = await import('../js/config.js');
 
@@ -137,7 +145,7 @@ S.state.me.treasures = [];
 S.state.me.helped = {};
 S.state.me.giftsReceived = 0;
 
-ok('寶物共 24 個', TREASURES.length === 24, String(TREASURES.length));
+ok('寶物共 29 個', TREASURES.length === 29, String(TREASURES.length));
 ok('每個寶物都有增益', TREASURES.every(t => t.buff && t.buff.kind));
 ok('每個寶物都有提示', TREASURES.every(t => t.hint && t.hint.length > 2));
 ok('沒有重複的 id', new Set(TREASURES.map(t => t.id)).size === TREASURES.length);
@@ -185,6 +193,100 @@ ok('★ 多個寶物相加 = 190', S.helpCapNow() === 190, String(S.helpCapNow()
 TUNING.helpCap = 0;
 ok('額度關閉時寶物不會硬開', S.helpLeft() === Infinity);
 S.state.me.treasures = [];
+
+/* ------------------------------------------------------------- 技能樹 -- */
+const { SKILLS, AXES, SP_STEPS, RARITY } = await import('../js/config.js');
+
+S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
+ok('一開始沒有技能點', S.spTotal() === 0, String(S.spTotal()));
+
+S.state.me.lifetime = SP_STEPS[0];
+ok('★ 過第一個門檻拿到 1 點', S.spTotal() === 1, String(S.spTotal()));
+S.state.me.lifetime = 1000;                    // 門檻 500 + 里程碑 1000
+ok('★ 里程碑也給點', S.spTotal() === 2, String(S.spTotal()));
+
+S.state.me.lifetime = 10 ** 9;                 // 全部拿好拿滿
+const maxSp = S.spTotal(), treeCost = SKILLS.reduce((n, s) => n + s.cost, 0);
+ok('★ 技能點永遠不夠點滿整棵樹', maxSp < treeCost, `${maxSp} vs ${treeCost}`);
+
+// 順序：不能跳級
+ok('★ 不能跳過第一層直接學第二層', !S.canLearn('press2'), S.skillBlock('press2'));
+S.learnSkill('press1');
+ok('學會第一層', S.hasSkill('press1'));
+ok('學會後就能學第二層', S.canLearn('press2'));
+ok('不能重複學', !S.canLearn('press1'), S.skillBlock('press1'));
+
+// 效果要疊進 buffOf
+// learnSkill() 會順手檢查成就，而成就會解鎖有 fish 增益的寶物。
+// 量技能效果之前一定要把寶物清掉，不然量到的是成就不是技能。
+S.state.me.skills = [];
+S.learnSkill('press1');                        // 熟練 +10%
+S.state.me.treasures = [];                     // ← 清掉剛剛順手解鎖的成就
+ok('★ 技能效果疊進 buffOf', Math.abs(S.buffOf('fish') - 0.10) < 1e-9,
+   String(S.buffOf('fish')));
+S.state.me.treasures = ['sweat'];              // 汗珠 +2%
+ok('★ 技能與寶物相加', Math.abs(S.buffOf('fish') - 0.12) < 1e-9,
+   String(S.buffOf('fish')));
+S.state.me.treasures = [];
+
+// 幫忙額度
+TUNING.helpCap = 100; S.state.me.skills = [];
+S.learnSkill('social1');                       // 熱心 +100
+S.state.me.treasures = [];                     // 同上：排除成就寶物的 help 增益
+ok('★ 熱心讓幫忙額度變 200', S.helpCapNow() === 200, String(S.helpCapNow()));
+TUNING.helpCap = 300;
+
+// 權限型技能
+S.state.me.skills = [];
+ok('沒學深掘就沒有傳說掉落權限', !S.grants('dropEpic'));
+ok('★ 傳說級寶物需要權限', RARITY.epic.needs === 'dropEpic');
+ok('★ 神話級寶物需要權限', RARITY.myth.needs === 'dropMyth');
+S.state.me.skills = ['hunt1','hunt2','hunt3'];
+ok('★ 學了深掘才有傳說掉落權限', S.grants('dropEpic'));
+ok('學了深掘還是沒有神話權限', !S.grants('dropMyth'));
+
+// 點滿一條軸 → 🌳 專精
+S.state.me.skills = []; S.state.me.treasures = [];
+ok('沒點滿不給專精', !S.axisDone('hunt'));
+S.state.me.skills = SKILLS.filter(s => s.axis === 'hunt').map(s => s.id);
+ok('★ 點滿探寶軸', S.axisDone('hunt'));
+ok('★ 點滿一條軸解鎖 🌳 專精', S.checkAchievements().some(t => t.id === 'master'));
+
+// 每條軸花費一樣，沒有哪條先天划算
+const costs = Object.keys(AXES).map(a =>
+  SKILLS.filter(s => s.axis === a).reduce((n, s) => n + s.cost, 0));
+ok('三條軸花費相同', new Set(costs).size === 1, costs.join('/'));
+ok('每軸都是四層', Object.keys(AXES).every(a =>
+  SKILLS.filter(s => s.axis === a).map(s => s.tier).sort().join() === '1,2,3,4'));
+
+// 掉落權限的端對端驗證：把亂數壓到 0（一定掉），看實際掉出什麼等級。
+// 這是「後期解鎖」真正的樣子 —— 沒點技能，那些東西根本不在池子裡。
+setRandom(0);
+S.state.me.treasures = []; S.state.me.skills = [];
+const noPerm = [];
+for (let i = 0; i < 15; i++) { const r = S.squash(); if (r.treasure) noPerm.push(r.treasure.rarity); }
+ok('★ 沒點技能就掉得到寶物', noPerm.length > 0, String(noPerm.length));
+ok('★ 沒權限時永遠掉不到傳說', !noPerm.includes('epic'), noPerm.join(','));
+ok('★ 沒權限時永遠掉不到神話', !noPerm.includes('myth'), noPerm.join(','));
+
+S.state.me.treasures = []; S.state.me.skills = ['hunt1','hunt2','hunt3'];
+const epicPerm = [];
+for (let i = 0; i < 15; i++) { const r = S.squash(); if (r.treasure) epicPerm.push(r.treasure.rarity); }
+ok('★ 點了深掘就掉得到傳說', epicPerm.includes('epic'), epicPerm.join(','));
+ok('點了深掘還是掉不到神話', !epicPerm.includes('myth'), epicPerm.join(','));
+
+S.state.me.treasures = []; S.state.me.skills = ['hunt1','hunt2','hunt3','hunt4'];
+const mythPerm = [];
+for (let i = 0; i < 15; i++) { const r = S.squash(); if (r.treasure) mythPerm.push(r.treasure.rarity); }
+ok('★ 點了神話之眼才掉得到神話', mythPerm.includes('myth'), mythPerm.join(','));
+
+setRandom(1);
+S.state.me.treasures = [];
+for (let i = 0; i < 30; i++) S.squash();
+const dropped = S.state.me.treasures.filter(id => treasureInfo(id).source === 'drop');
+ok('★ 亂數在上限時完全不掉寶', dropped.length === 0, dropped.join(','));
+
+S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
