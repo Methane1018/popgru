@@ -1,12 +1,13 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.8.0';
+import * as S from './store.js?v=0.9.0';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
-} from './config.js?v=0.8.0';
+  TREASURES, RARITY, SOURCE_LABEL,
+} from './config.js?v=0.9.0';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -132,7 +133,30 @@ const sfxSad  = () =>   tone({ from:300, to:110, dur:0.34, type:'sawtooth', vol:
 /* ------------------------------------------------------------------ 互動 -- */
 let stuck = false;                                    // 稀有事件：企鵝彈不回來
 
-function press() {
+// 彩蛋的計數器。都放在記憶體裡，重整就歸零 —— 本來就該是「一口氣做到」。
+let tickleRun = 0, comboRun = 0, lastSquashAt = 0, brandRun = 0, brandAt = 0;
+
+function checkEggs(ev, r) {
+  if (!r.counted) return;
+  const now = Date.now();
+
+  // 🕛 準時：整點剛過的那一分鐘
+  if (new Date().getMinutes() === 0) S.unlockTreasure('oclock');
+
+  // 🦶 搔癢：連續戳腳 10 下（腳大約在舞台下緣 15%）
+  if (ev && typeof ev.clientY === 'number') {
+    const b = stage.getBoundingClientRect();
+    tickleRun = ((ev.clientY - b.top) / b.height) > 0.85 ? tickleRun + 1 : 0;
+    if (tickleRun >= 10) S.unlockTreasure('tickle');
+  }
+
+  // 🔁 一鏡到底：連續 100 下，中間不能停超過 2 秒
+  comboRun = (now - lastSquashAt < 2000) ? comboRun + 1 : 1;
+  lastSquashAt = now;
+  if (comboRun >= 100) S.unlockTreasure('combo');
+}
+
+function press(ev) {
   if (pointerDown || stuck) return;      // 擋的是「按住不放」，不是「按太快」
   pointerDown = true;
   clearTimeout(releaseTimer);
@@ -157,6 +181,7 @@ function press() {
     }, 3000);
     return;
   }
+  checkEggs(ev, r);
   if (r.newDay && r.streakEvent) announceStreak(r.streakEvent);
   if (r.capped) toast(r.capped === 'help'
     ? '今天幫忙的額度用完了，明天再來幫他'
@@ -184,7 +209,7 @@ function announceStreak(e) {
 stage.addEventListener('pointerdown', e => {
   e.preventDefault();
   try { stage.setPointerCapture?.(e.pointerId); } catch {}
-  press();
+  press(e);                              // 帶著事件，搔癢彩蛋要知道點在哪
 });
 ['pointerup','pointercancel'].forEach(t =>
   stage.addEventListener(t, e => { e.preventDefault(); release(); }));
@@ -333,9 +358,9 @@ $('sheetClose').onclick = closePanel;
 function renderPanel(name) {
   const body = $('sheetBody'); body.innerHTML = '';
   $('sheetTitle').textContent =
-    { people:'大家的格魯', items:'道具', wardrobe:'裝扮', inbox:'信箱',
+    { people:'大家的格魯', items:'道具', wardrobe:'裝扮', codex:'圖鑑', inbox:'信箱',
       me:'我的格魯', changelog:'更新內容' }[name] || '';
-  ({ people: panelPeople, items: panelItems, wardrobe: panelWardrobe,
+  ({ people: panelPeople, items: panelItems, wardrobe: panelWardrobe, codex: panelCodex,
      inbox: panelInbox, me: panelMe, changelog: panelChangelog })[name]?.(body);
 }
 
@@ -497,6 +522,83 @@ function panelWardrobe(body) {
   body.append(bar);
 }
 
+
+/* --- 圖鑑 --- */
+let dexFilter = 'all';
+
+function panelCodex(body) {
+  const st = S.state;
+  const got = TREASURES.filter(t => S.hasTreasure(t.id));
+
+  body.append(el('p', 'note', `收集進度 ${got.length} / ${TREASURES.length}`));
+
+  // 目前總增益，讓人看得到收集的回報
+  const axes = [
+    ['fish','壓扁多拿魚', v => `+${Math.round(v*100)}%`],
+    ['help','每天幫忙額度', v => `+${nf(v)} 下`],
+    ['drop','寶物掉落機率', v => `+${Math.round(v*100)}%`],
+    ['gold','金魚更容易掉', v => `+${Math.round(v*100)}%`],
+    ['double','雙倍卡持續', v => `+${nf(v)} 下`],
+    ['freezeOff','凍結卡折扣', v => `-${Math.round(v*100)}%`],
+    ['giftOff','道具折扣', v => `-${Math.round(v*100)}%`],
+  ].map(([k,label,fmt]) => [label, S.buffOf(k), fmt])
+   .filter(([,v]) => v > 0);
+  const sum = el('p', 'dex-sum');
+  sum.innerHTML = axes.length
+    ? '目前總增益　' + axes.map(([l,v,f]) => `${l} <b>${f(v)}</b>`).join('　·　')
+    : '還沒有任何寶物。壓扁時有機率掉落，也可以靠成就和彩蛋拿到。';
+  body.append(sum);
+
+  const filters = el('div', 'tabs');
+  for (const [k, label] of [['all','全部'], ...Object.entries(SOURCE_LABEL)]) {
+    const t = el('button', 'tab' + (dexFilter === k ? ' on' : ''), label);
+    t.onclick = () => { dexFilter = k; renderPanel('codex'); };
+    filters.append(t);
+  }
+  body.append(filters);
+
+  const list = TREASURES.filter(t => dexFilter === 'all' || t.source === dexFilter);
+  const grid = el('div', 'dex');
+  for (const t of list) {
+    const has = S.hasTreasure(t.id);
+    const cell = el('div', 'dex-cell ' + (has ? 'got' : 'locked'));
+    if (has) cell.style.borderColor = RARITY[t.rarity].color;
+
+    cell.append(el('div', 'dex-icon', has ? t.icon : '❔'));
+    cell.append(el('div', 'dex-name', has ? t.name : '???'));
+
+    const rar = el('span', 'dex-rar', RARITY[t.rarity].name);
+    rar.style.background = RARITY[t.rarity].color;
+    cell.append(rar);
+
+    // 未解鎖給提示但不給增益 —— 有方向，仍然要自己動手
+    cell.append(el('div', 'dex-sub', has ? buffText(t) : t.hint));
+
+    if (!has && t.source === 'shop') {
+      const b = el('button', 'dex-buy', `${t.gold} 🥇`);
+      b.onclick = async () => {
+        try { await S.buyTreasure(t.id); toast(`換到 ${t.icon} ${t.name}`); renderPanel('codex'); }
+        catch (e) { toast(e.message); }
+      };
+      cell.append(b);
+    }
+    grid.append(cell);
+  }
+  body.append(grid);
+}
+
+function buffText(t) {
+  const v = t.buff.value;
+  return {
+    fish:      `壓扁多拿 ${Math.round(v*100)}% 魚`,
+    help:      `每天多幫 ${nf(v)} 下`,
+    drop:      `掉落機率 +${Math.round(v*100)}%`,
+    gold:      `金魚門檻 -${Math.round(v*100)}%`,
+    double:    `雙倍卡多 ${nf(v)} 下`,
+    freezeOff: `凍結卡便宜 ${Math.round(v*100)}%`,
+    giftOff:   `道具便宜 ${Math.round(v*100)}%`,
+  }[t.buff.kind] || '';
+}
 
 /* --- 更新內容 --- */
 function panelChangelog(body) {
@@ -706,10 +808,18 @@ function panelMe(body) {
 }
 
 /* ------------------------------------------------------------------ 導覽 -- */
-$('brand').onclick     = () => showPanel('changelog');
+$('brand').onclick     = () => {
+  // 🔢 好奇心：短時間內連點版本號 5 下
+  const now = Date.now();
+  brandRun = (now - brandAt < 1200) ? brandRun + 1 : 1;
+  brandAt = now;
+  if (brandRun >= 5) S.unlockTreasure('curious');
+  showPanel('changelog');
+};
 $('navPeople').onclick = () => { showPanel('people'); S.loadRoster().then(() => refreshPanel('people')); };
 $('navItems').onclick    = () => { showPanel('items'); S.loadRoster(); };
 $('navWardrobe').onclick = () => showPanel('wardrobe');
+$('navCodex').onclick    = () => showPanel('codex');
 $('navInbox').onclick  = () => {
   showPanel('inbox');
   // 也要名單才查得到寄件人現在的名字
@@ -748,6 +858,16 @@ S.on('writefail', e => {
   const bar = $('writefail');
   bar.textContent = `⚠️ 存檔失敗（${e.code || '未知錯誤'}）· 你壓的還在這台裝置上，但沒有存進伺服器`;
   bar.hidden = false;
+});
+// 單一寶物到手
+S.on('treasure', t => {
+  toast(`${t.icon} 找到「${t.name}」· ${RARITY[t.rarity].name}`);
+  if (navigator.vibrate) { try { navigator.vibrate([15,50,25]); } catch {} }
+});
+// 一次多個（通常是上線時補發的成就）→ 合併成一則，不要洗版
+S.on('treasures', list => {
+  if (list.length === 1) return toast(`${list[0].icon} 找到「${list[0].name}」`);
+  setTimeout(() => toast(`解鎖了 ${list.length} 個寶物 · 點下面的圖鑑看看`), 1200);
 });
 S.on('claimed', c => {
   if (!c.taken) return;

@@ -1,0 +1,190 @@
+// 純邏輯測試：訪客模式（不碰 Firebase）
+const mem = new Map();
+globalThis.localStorage = {
+  getItem: k => (mem.has(k) ? mem.get(k) : null),
+  setItem: (k, v) => mem.set(k, String(v)),
+  removeItem: k => mem.delete(k),
+  clear: () => mem.clear(),
+};
+
+const S = await import('../js/store.js');
+const { TUNING } = await import('../js/config.js');
+
+let pass = 0, fail = 0;
+const ok = (name, cond, extra='') => {
+  (cond ? pass++ : fail++);
+  console.log(`${cond ? 'PASS' : 'FAIL'} :: ${name}${cond ? '' : '  ← ' + extra}`);
+};
+const yesterday = () => { const d = new Date(); d.setDate(d.getDate()-1); return S.dayStr(d); };
+const daysAgo   = n => { const d = new Date(); d.setDate(d.getDate()-n); return S.dayStr(d); };
+
+await S.init();
+ok('init → 訪客模式', S.state.mode === 'guest', S.state.mode);
+ok('預設格魯叫格魯', S.state.myGru.name === '格魯', S.state.myGru.name);
+ok('一開始在自己家', S.state.viewing.isMine === true);
+
+// --- 基本計分 ---
+const r1 = S.squash();
+ok('第一下計分', r1.counted === true);
+ok('第一下拿到魚', r1.gained === TUNING.fishPerSquash, String(r1.gained));
+ok('連續天數 → 1', S.state.me.streak === 1, String(S.state.me.streak));
+ok('自己的格魯 +1', S.state.myGru.squashes === 1, String(S.state.myGru.squashes));
+ok('訪客不計入小圈子', S.state.global.squashes === 0, String(S.state.global.squashes));
+
+for (let i = 0; i < 49; i++) S.squash();
+ok('壓 50 下累計正確', S.state.me.lifetime === 50, String(S.state.me.lifetime));
+ok('魚 = 50', S.state.me.fish === 50, String(S.state.me.fish));
+ok('格魯總數 = 50', S.state.myGru.squashes === 50, String(S.state.myGru.squashes));
+
+// --- 存檔 ---
+ok('訪客進度有存進 localStorage', JSON.parse(mem.get('popgru.guest')).lifetime === 50);
+
+// --- 連續天數：昨天玩過 → 今天 +1 ---
+S.state.me.lastDay = yesterday();
+S.state.me.streak = 5;
+const r2 = S.squash();
+ok('昨天有玩 → 連續天數 +1', S.state.me.streak === 6, String(S.state.me.streak));
+ok('回報 continue 事件', r2.streakEvent?.kind === 'continue', JSON.stringify(r2.streakEvent));
+ok('跨日後今日計數歸零再累加', S.state.me.todayCount === 1, String(S.state.me.todayCount));
+
+// --- 連續天數：斷了 ---
+S.state.me.lastDay = daysAgo(3);
+S.state.me.streak = 10;
+S.state.me.freezes = 0;
+const r3 = S.squash();
+ok('中斷 3 天且沒凍結卡 → 重新算', S.state.me.streak === 1, String(S.state.me.streak));
+ok('回報 broken 事件', r3.streakEvent?.kind === 'broken', JSON.stringify(r3.streakEvent));
+
+// --- 凍結卡救回 ---
+S.state.me.lastDay = daysAgo(3);   // 漏掉 2 天
+S.state.me.streak = 10;
+S.state.me.freezes = 3;
+const r4 = S.squash();
+ok('凍結卡保住連續天數', S.state.me.streak === 11, String(S.state.me.streak));
+ok('用掉 2 張凍結卡', S.state.me.freezes === 1, String(S.state.me.freezes));
+ok('回報 frozen 事件', r4.streakEvent?.kind === 'frozen', JSON.stringify(r4.streakEvent));
+
+// --- 凍結卡不夠 ---
+S.state.me.lastDay = daysAgo(5);   // 漏掉 4 天
+S.state.me.streak = 20;
+S.state.me.freezes = 1;
+S.squash();
+ok('凍結卡不夠 → 還是斷了，且不亂扣', S.state.me.streak === 1 && S.state.me.freezes === 1,
+   `streak=${S.state.me.streak} freezes=${S.state.me.freezes}`);
+
+// --- 雙倍魚 ---
+S.state.me.double = 2;
+const fishBefore = S.state.me.fish;
+S.squash(); S.squash(); S.squash();
+ok('雙倍魚：2 下加倍 + 1 下正常 = 5 條', S.state.me.fish - fishBefore === 5,
+   String(S.state.me.fish - fishBefore));
+ok('雙倍次數用完歸零', S.state.me.double === 0, String(S.state.me.double));
+
+// --- 每日上限（預設關閉） ---
+ok('每日上限預設關閉', TUNING.dailyCap === 0);
+S.state.me.todayCount = 999999;
+ok('關閉時壓再多都計分', S.squash().counted === true);
+
+// --- 每日上限（開啟時） ---
+TUNING.dailyCap = 5;
+S.state.me.lastDay = yesterday();
+S.state.me.todayCount = 0;
+let counted = 0;
+for (let i = 0; i < 8; i++) if (S.squash().counted) counted++;
+ok('上限 5 → 只算 5 下', counted === 5, String(counted));
+const capped = S.squash();
+ok('超過上限回報 capped', capped.capped === 'daily' && capped.counted === false, JSON.stringify(capped));
+TUNING.dailyCap = 0;
+
+// --- 金魚 ---
+TUNING.goldfishOdds = 3;
+const goldBefore = S.state.me.goldfish;
+let gotGold = false;
+for (let i = 0; i < 12; i++) if (S.squash().goldfish) gotGold = true;
+ok('金魚會依機率掉落', gotGold && S.state.me.goldfish > goldBefore,
+   `gold=${S.state.me.goldfish}`);
+
+// --- 幫忙壓（訪客模式下不會寫別人家，但狀態要對） ---
+S.state.viewing = { uid:'someone', name:'小明的格魯', ownerName:'小明', squashes:100, isMine:false };
+const r5 = S.squash();
+ok('幫別人壓標記 helping', r5.helping === true);
+ok('幫別人壓也算自己的累計', r5.counted === true);
+ok('別人的格魯數字 +1', S.state.viewing.squashes === 101, String(S.state.viewing.squashes));
+
+// --- helpCap ---
+// 先清掉寶物：🔥 一週皆勤／🧭 羅盤 會加寬幫忙額度，那是正確行為，
+// 但會讓這個「上限 2」的測試失去意義
+S.state.me.treasures = [];
+TUNING.helpCap = 2;
+S.state.me.helpDay = S.dayStr();
+S.state.me.helpToday = 0;
+let helped = 0;
+for (let i = 0; i < 5; i++) if (S.squash().counted) helped++;
+ok('helpCap 只限制幫忙的次數', helped === 2, String(helped));
+S.state.viewing = { ...S.state.myGru, isMine:true };
+ok('回自己家不受 helpCap 限制', S.squash().counted === true);
+TUNING.helpCap = 0;
+
+// --- 日期工具 ---
+ok('dayDiff 正確', S.dayDiff('2026-08-27','2026-08-30') === 3);
+ok('今天玩過 → streak 還活著', S.streakAlive(S.dayStr()) === true);
+ok('昨天玩過 → streak 還活著', S.streakAlive(yesterday()) === true);
+ok('三天前 → streak 已斷', S.streakAlive(daysAgo(3)) === false);
+
+// ─────────────────────────── 寶物與圖鑑 ───────────────────────────
+const { TREASURES, treasureInfo } = await import('../js/config.js');
+S.state.me.treasures = [];
+S.state.me.helped = {};
+S.state.me.giftsReceived = 0;
+
+ok('寶物共 24 個', TREASURES.length === 24, String(TREASURES.length));
+ok('每個寶物都有增益', TREASURES.every(t => t.buff && t.buff.kind));
+ok('每個寶物都有提示', TREASURES.every(t => t.hint && t.hint.length > 2));
+ok('沒有重複的 id', new Set(TREASURES.map(t => t.id)).size === TREASURES.length);
+
+ok('一開始沒有任何寶物', S.buffOf('fish') === 0 && !S.hasTreasure('sweat'));
+S.unlockTreasure('sweat', true);
+ok('解鎖後有了', S.hasTreasure('sweat'));
+ok('增益生效', Math.abs(S.buffOf('fish') - 0.02) < 1e-9, String(S.buffOf('fish')));
+ok('重複解鎖沒有副作用', S.unlockTreasure('sweat', true) === false
+   && S.state.me.treasures.length === 1);
+S.unlockTreasure('shell', true);                       // 貝殼 +5%
+ok('同一條軸會相加', Math.abs(S.buffOf('fish') - 0.07) < 1e-9, String(S.buffOf('fish')));
+ok('別條軸不受影響', S.buffOf('drop') === 0);
+S.unlockTreasure('down', true);                        // 絨毛 掉落 +20%
+ok('不同軸各自累積', Math.abs(S.buffOf('drop') - 0.20) < 1e-9);
+ok('不存在的 id 不會解鎖', S.unlockTreasure('nope', true) === false);
+
+// 成就用既有欄位判定
+S.state.me.treasures = [];
+S.state.me.lifetime = 0; S.state.me.streak = 0;
+ok('條件沒到不會給', S.checkAchievements().length === 0);
+S.state.me.lifetime = 1;
+ok('★ 壓第一下解鎖「第一下」', S.checkAchievements().some(t => t.id === 'first'));
+S.state.me.lifetime = 1000;
+ok('★ 千下解鎖「千錘百鍊」', S.checkAchievements().some(t => t.id === 'k1'));
+S.state.me.streak = 7;
+ok('★ 連續七天解鎖', S.checkAchievements().some(t => t.id === 'week'));
+ok('已解鎖的不會重複給', S.checkAchievements().length === 0);
+S.state.me.helped = { a:5, b:5, c:5 };
+ok('★ 幫過三個人解鎖「好鄰居」', S.checkAchievements().some(t => t.id === 'nb3'));
+ok('helpedCount 正確', S.helpedCount() === 3, String(S.helpedCount()));
+S.state.me.helped = { a:5, b:5, c:5, d:5, e:5 };
+ok('★ 幫過五個人解鎖「街坊」', S.checkAchievements().some(t => t.id === 'nb5'));
+S.state.global.squashes = 100000;
+ok('★ 小圈子破十萬解鎖', S.checkAchievements().some(t => t.id === 'mt100k'));
+
+// 幫忙額度會被寶物加寬
+S.state.me.treasures = [];
+TUNING.helpCap = 100;
+ok('沒寶物時額度就是設定值', S.helpCapNow() === 100, String(S.helpCapNow()));
+S.unlockTreasure('compass', true);                     // 羅盤 +50
+ok('★ 羅盤讓額度變 150', S.helpCapNow() === 150, String(S.helpCapNow()));
+S.unlockTreasure('nb3', true);                         // 好鄰居 +40
+ok('★ 多個寶物相加 = 190', S.helpCapNow() === 190, String(S.helpCapNow()));
+TUNING.helpCap = 0;
+ok('額度關閉時寶物不會硬開', S.helpLeft() === Infinity);
+S.state.me.treasures = [];
+
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

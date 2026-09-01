@@ -8,7 +8,8 @@
 import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
-} from './config.js?v=0.8.0';
+  TREASURES, RARITY, treasureInfo, SKINS,
+} from './config.js?v=0.9.0';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -59,6 +60,7 @@ const blankMe = () => ({
   uid:null, name:null, googleName:null, nick:null, photo:null,
   lifetime:0, fish:0, goldfish:0, medals:0, freezes:0, double:0,
   ownedHats:[], ownedSkins:[], loaded:false,
+  treasures:[], helped:{}, giftsReceived:0,
   streak:0, bestStreak:0, lastDay:null, todayCount:0, helpToday:0, helpDay:null,
 });
 const blankGru = () => ({
@@ -87,10 +89,14 @@ export function dailyLeft() {
   const used = state.me.lastDay === dayStr() ? (state.me.todayCount || 0) : 0;
   return Math.max(0, TUNING.dailyCap - used);
 }
+// 幫忙額度會被寶物加寬（🧭 羅盤、🤝 好鄰居、🔥 一週皆勤）
+export const helpCapNow = () =>
+  TUNING.helpCap <= 0 ? 0 : TUNING.helpCap + buffOf('help');
+
 export function helpLeft() {
   if (TUNING.helpCap <= 0) return Infinity;
   const used = state.me.helpDay === dayStr() ? (state.me.helpToday || 0) : 0;
-  return Math.max(0, TUNING.helpCap - used);
+  return Math.max(0, helpCapNow() - used);
 }
 
 /* ------------------------------------------------------------ 訪客存檔 -- */
@@ -174,7 +180,7 @@ function outboxSettle(uid, target, n, fish, gold) {
 // 前段是「絕對值」欄位（只有這台裝置在寫，遺失就回不來）；
 // 後段是顯示用的數字，載入時先拿來墊著，免得畫面閃一下 0 再跳回真值。
 const MIRROR_FIELDS = ['streak','bestStreak','lastDay','todayCount','helpToday','helpDay','freezes','double'];
-const MIRROR_DISPLAY = ['lifetime','fish','goldfish','medals'];
+const MIRROR_DISPLAY = ['lifetime','fish','goldfish','medals','treasures'];
 const MIRROR_ALL = [...MIRROR_FIELDS, ...MIRROR_DISPLAY];
 
 function mirrorSave() {
@@ -349,6 +355,9 @@ async function onSignedIn(user) {
         ...(state.myGru.hat ? [state.myGru.hat] : []),
       ])),
       ownedSkins: Array.isArray(d.ownedSkins) ? d.ownedSkins : [],
+      treasures: Array.isArray(d.treasures) ? d.treasures : [],
+      helped: (d.helped && typeof d.helped === 'object') ? d.helped : {},
+      giftsReceived: d.giftsReceived || 0,
       nick: realName(d.nick),
       googleName: realName(d.googleName) || state.me.googleName,
       name: realName(d.nick) || realName(d.googleName) || state.me.googleName || NO_NAME,
@@ -375,6 +384,7 @@ async function onSignedIn(user) {
       Object.assign(state.me, pickd);
       state.me.loaded = true;      // 有了這個，flush() 才會開始寫
       repairStreak();
+      checkAchievements();          // 上線當下大家會一次達成好幾個，呼叫端要合併通知
 
       const m = state.me;
       console.log(
@@ -536,7 +546,7 @@ export function squash() {
   repairStreak();                            // 防呆：今天玩過就不該是 0 天
 
   const overDaily = TUNING.dailyCap > 0 && me.todayCount >= TUNING.dailyCap;
-  const overHelp  = !v.isMine && TUNING.helpCap > 0 && me.helpToday >= TUNING.helpCap;
+  const overHelp  = !v.isMine && TUNING.helpCap > 0 && me.helpToday >= helpCapNow();
   if (overDaily || overHelp) {                       // 壓得動，但不計分
     r.capped = overHelp ? 'help' : 'daily';
     sync(); return r;
@@ -551,18 +561,29 @@ export function squash() {
   if (me.double > 0) me.double -= 1;
   r.gained = TUNING.fishPerSquash * mult;
 
-  const bonus = cosmeticBonus();          // 持有幾件裝扮就加幾成
+  const bonus = cosmeticBonus() + buffOf('fish');   // 裝扮持有量 ＋ 寶物增益
   if (bonus > 0) {
     fishFrac += r.gained * bonus;
     if (fishFrac >= 1) { const extra = Math.floor(fishFrac); fishFrac -= extra; r.gained += extra; r.bonusFish = extra; }
   }
   me.fish += r.gained;
 
+  // 🔮 水晶球、🕛 準時 會讓金魚更容易掉
+  const goldOdds = Math.max(1, Math.round(TUNING.goldfishOdds * (1 - buffOf('gold'))));
   squashTicks += 1;
-  if (squashTicks % TUNING.goldfishOdds === 0) { r.goldfish = true; me.goldfish += 1; }
+  if (squashTicks % goldOdds === 0) { r.goldfish = true; me.goldfish += 1; }
+
+  const drop = rollTreasure();                       // 寶物掉落
+  if (drop && unlockTreasure(drop.id)) r.treasure = drop;
+
+  if (!v.isMine && v.uid) {                          // 記下幫過誰，成就要用
+    me.helped = { ...me.helped, [v.uid]: (me.helped[v.uid] || 0) + 1 };
+  }
 
   v.squashes += 1;                                   // 眼前這隻格魯的總數
   if (v.isMine) state.myGru.squashes = v.squashes;
+
+  checkAchievements();                     // 成就用既有欄位判定，很便宜
 
   if (state.mode === 'member') {
     // 在自己家就直接用自己的 uid。之前依賴 state.viewing.uid，
@@ -647,6 +668,7 @@ export async function flush() {
         b.set(visitRef(target, me.uid), {
           name: me.name, photo: me.photo, count: F.increment(n), at: F.serverTimestamp(),
         }, { merge:true });
+        p['helped.' + target] = F.increment(n);      // 自己這邊也記一筆，成就要用
       }
       b.set(globalRef(), {
         squashes: F.increment(n),
@@ -818,6 +840,86 @@ export function cosmeticCount() {
 export const cosmeticBonus = () =>
   Math.min(TUNING.cosmeticCap, cosmeticCount() * TUNING.cosmeticPerItem);
 
+/* ----------------------------------------------------------------- 寶物 -- */
+export const hasTreasure = id => state.me.treasures.includes(id);
+
+// 增益是「解鎖就生效」，不需要裝備。同一條軸上的多個寶物直接相加。
+export function buffOf(kind) {
+  let v = 0;
+  for (const id of state.me.treasures) {
+    const t = treasureInfo(id);
+    if (t && t.buff.kind === kind) v += t.buff.value;
+  }
+  return v;
+}
+
+export const helpedCount = () => Object.keys(state.me.helped || {}).length;
+export const bestHelped  = () => Math.max(0, ...Object.values(state.me.helped || {}));
+
+// 解鎖一個寶物。重複呼叫沒有副作用。
+export function unlockTreasure(id, quiet) {
+  if (!treasureInfo(id) || hasTreasure(id)) return false;
+  state.me.treasures = [...state.me.treasures, id];
+  if (state.mode === 'member' && fb) {
+    queuePatch({ treasures: fb.F.arrayUnion(id) });
+    scheduleFlush();
+  } else { saveGuest(); }
+  if (!quiet) emit('treasure', treasureInfo(id));
+  return true;
+}
+
+// 商店寶物用金魚買（金魚原本只能買金牌，這樣它有第二個用途）
+export async function buyTreasure(id) {
+  const t = treasureInfo(id);
+  if (!t || t.source !== 'shop') throw new Error('這個不是商店寶物');
+  if (hasTreasure(id))           throw new Error('已經有了');
+  if (state.me.goldfish < t.gold) throw new Error(`金魚不夠，需要 ${t.gold} 條`);
+  state.me.goldfish -= t.gold;
+  if (state.mode === 'member' && fb) {
+    queuePatch({ goldfish: fb.F.increment(-t.gold) });
+  }
+  unlockTreasure(id);
+  sync();
+}
+
+// 成就都用既有欄位判定，不需要額外的計數器（helped / giftsReceived 除外）
+const ACHIEVE = {
+  first:   () => state.me.lifetime >= 1,
+  k1:      () => state.me.lifetime >= 1000,
+  week:    () => state.me.streak >= 7,
+  month:   () => state.me.streak >= 30,
+  nb3:     () => helpedCount() >= 3,
+  nb5:     () => helpedCount() >= 5,
+  loved:   () => (state.me.giftsReceived || 0) >= 10,
+  mt100k:  () => state.global.squashes >= 100000,
+  stylish: () => cosmeticCount() >= 10,
+  hatlove: () => SKINS.hat.filter(h => h.cost > 0).every(h => ownsSkin('hat', h.id)),
+};
+
+// 回傳這次新解鎖的清單。上線當下大家會一次達成好幾個，所以呼叫端要合併通知。
+export function checkAchievements() {
+  const got = [];
+  for (const [id, test] of Object.entries(ACHIEVE)) {
+    if (hasTreasure(id)) continue;
+    let ok = false; try { ok = test(); } catch {}
+    if (ok && unlockTreasure(id, true)) got.push(treasureInfo(id));
+  }
+  if (got.length) { sync(); emit('treasures', got); }
+  return got;
+}
+
+// 掉落。稀有的先擲，才不會被常見的蓋過去。
+function rollTreasure() {
+  const mult = 1 + buffOf('drop');
+  const pool = TREASURES
+    .filter(t => t.source === 'drop' && !hasTreasure(t.id))
+    .sort((a, b) => RARITY[b.rarity].odds - RARITY[a.rarity].odds);
+  for (const t of pool) {
+    if (Math.random() < mult / RARITY[t.rarity].odds) return t;
+  }
+  return null;
+}
+
 // 換戴已解鎖的帽子（免費），或傳 null 脫掉
 export async function setHat(emoji) {
   if (emoji && !ownsHat(emoji)) throw new Error('還沒解鎖這頂帽子');
@@ -886,11 +988,14 @@ export async function sendItem(toUid, key, extra = {}) {
 export async function buyForSelf(key, extra = {}) {
   const item = ITEMS[key], me = state.me;
   if (!item?.self)        throw new Error('這個不能買給自己');
-  if (me.fish < item.cost) throw new Error('魚不夠');
+  // 🧊 碎冰讓凍結卡打折
+  const off  = key === 'freeze' ? buffOf('freezeOff') : 0;
+  const cost = Math.max(1, Math.round(item.cost * (1 - off)));
+  if (me.fish < cost) throw new Error('魚不夠');
 
-  me.fish -= item.cost;
+  me.fish -= cost;
   if (key === 'freeze') me.freezes += 1;
-  if (key === 'double') me.double  += TUNING.doubleClicks;
+  if (key === 'double') me.double  += TUNING.doubleClicks + buffOf('double');   // 🌌 星塵
   sync();
 
   if (state.mode === 'member' && fb) {
@@ -913,7 +1018,7 @@ export async function collectInbox() {
   for (const m of unread) {
     if (m.type === 'fish')   fish    += (ITEMS.fish.gives || 20);
     if (m.type === 'freeze') freezes += 1;
-    if (m.type === 'double') dbl     += TUNING.doubleClicks;
+    if (m.type === 'double') dbl     += TUNING.doubleClicks + buffOf('double');
     if (m.type === 'medal')  medals  += 1;
     if (m.type === 'hat')    hat      = m.hat || '🎩';
   }

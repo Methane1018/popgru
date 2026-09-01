@@ -26,6 +26,13 @@ export const firebaseConfig = {
 //  （順序是刻意的：不寫更新內容就升不了版。）
 // ----------------------------------------------------------------------------
 export const CHANGELOG = [
+  { v:'0.9.0', date:'2026-09-01', notes:[
+    '加入寶物與圖鑑：24 個寶物，四種來源 —— 掉落、成就、彩蛋、商店',
+    '每個寶物都有不同的增益，解鎖就生效，不用裝備',
+    '成就用你既有的紀錄判定，所以一上線就會補發好幾個',
+    '有四個彩蛋藏在遊戲裡。圖鑑會給提示，但不會告訴你答案',
+    '金魚終於有第二個用途：可以在圖鑑裡換兩個寶物',
+  ]},
   { v:'0.8.0', date:'2026-08-31', notes:[
     '商店拆成「🎁 道具」和「🎨 裝扮」兩個按鈕',
     '格魯可以拿東西了：水槍、斧頭、平底鍋、麥克風、球棒、珍奶等 11 種',
@@ -159,6 +166,88 @@ export const MILESTONES = [
   { at:    500000, label: '五十萬',    unlock: '🌈 彩虹' },
   { at:   1000000, label: '一百萬下',  unlock: '💎 鑽石' },
 ];
+
+// ----------------------------------------------------------------------------
+//  寶物與圖鑑
+//
+//  增益跟著「解鎖」走，不需要裝備 —— 跟裝扮同一個原則。
+//  刻意把增益分散到不同軸，不要每個都是「魚 +X%」：
+//  那樣收集 20 個只是一個數字變大，記不住哪個是哪個，也容易疊爆。
+//
+//  buff.kind：
+//    fish    魚產出 +value（比例）
+//    help    每天幫忙額度 +value（次數）
+//    drop    寶物掉落機率 ×(1+value)
+//    gold    金魚門檻 ×(1-value)，越小越容易掉
+//    double  雙倍卡每次給的次數 +value
+//    freezeOff / giftOff   凍結卡 / 道具打折（比例）
+// ----------------------------------------------------------------------------
+export const RARITY = {
+  common: { name:'常見', odds: 300,   color:'#7d8f9c' },
+  rare:   { name:'稀有', odds: 2000,  color:'#2f7fd0' },
+  epic:   { name:'傳說', odds: 20000, color:'#a457d8' },
+};
+
+export const TREASURES = [
+  // ── 機率掉落 8 ──
+  { id:'sweat',   icon:'💦', name:'汗珠',     rarity:'common', source:'drop',
+    hint:'壓著壓著就會掉',            buff:{ kind:'fish', value:0.02 } },
+  { id:'down',    icon:'🪶', name:'絨毛',     rarity:'common', source:'drop',
+    hint:'壓著壓著就會掉',            buff:{ kind:'drop', value:0.20 } },
+  { id:'shard',   icon:'🧊', name:'碎冰',     rarity:'common', source:'drop',
+    hint:'壓著壓著就會掉',            buff:{ kind:'freezeOff', value:0.30 } },
+  { id:'shell',   icon:'🐚', name:'貝殼',     rarity:'rare',   source:'drop',
+    hint:'比較難掉的那種',            buff:{ kind:'fish', value:0.05 } },
+  { id:'orb',     icon:'🔮', name:'水晶球',   rarity:'rare',   source:'drop',
+    hint:'比較難掉的那種',            buff:{ kind:'gold', value:0.20 } },
+  { id:'compass', icon:'🧭', name:'羅盤',     rarity:'rare',   source:'drop',
+    hint:'比較難掉的那種',            buff:{ kind:'help', value:50 } },
+  { id:'crown',   icon:'👑', name:'王冠碎片', rarity:'epic',   source:'drop',
+    hint:'幾乎不會掉的那種',          buff:{ kind:'fish', value:0.08 } },
+  { id:'stardust',icon:'🌌', name:'星塵',     rarity:'epic',   source:'drop',
+    hint:'幾乎不會掉的那種',          buff:{ kind:'double', value:50 } },
+
+  // ── 成就 10 ──
+  { id:'first',   icon:'🥚', name:'第一下',   rarity:'common', source:'achieve',
+    hint:'壓下你的第一下',            buff:{ kind:'fish', value:0.01 } },
+  { id:'k1',      icon:'🏃', name:'千錘百鍊', rarity:'common', source:'achieve',
+    hint:'自己累計壓滿 1,000 下',      buff:{ kind:'fish', value:0.03 } },
+  { id:'week',    icon:'🔥', name:'一週皆勤', rarity:'rare',   source:'achieve',
+    hint:'連續 7 天都有來',            buff:{ kind:'help', value:30 } },
+  { id:'month',   icon:'📅', name:'一月不輟', rarity:'epic',   source:'achieve',
+    hint:'連續 30 天都有來',           buff:{ kind:'fish', value:0.06 } },
+  { id:'nb3',     icon:'🤝', name:'好鄰居',   rarity:'common', source:'achieve',
+    hint:'幫過 3 個不同的人',          buff:{ kind:'help', value:40 } },
+  { id:'nb5',     icon:'🏘', name:'街坊',     rarity:'rare',   source:'achieve',
+    hint:'幫過 5 個不同的人',          buff:{ kind:'fish', value:0.04 } },
+  { id:'loved',   icon:'🎁', name:'人緣',     rarity:'rare',   source:'achieve',
+    hint:'收到 10 樣別人送的東西',      buff:{ kind:'giftOff', value:0.10 } },
+  { id:'mt100k',  icon:'🗻', name:'十萬大山', rarity:'epic',   source:'achieve',
+    hint:'小圈子總數突破十萬',          buff:{ kind:'fish', value:0.05 } },
+  { id:'stylish', icon:'🎨', name:'有型',     rarity:'common', source:'achieve',
+    hint:'擁有 10 件裝扮',             buff:{ kind:'drop', value:0.15 } },
+  { id:'hatlove', icon:'🎩', name:'帽癡',     rarity:'epic',   source:'achieve',
+    hint:'集滿所有帽子',               buff:{ kind:'fish', value:0.05 } },
+
+  // ── 彩蛋 4 ──
+  { id:'oclock',  icon:'🕛', name:'準時',     rarity:'rare',   source:'egg',
+    hint:'在某個整點剛過的時候壓一下',   buff:{ kind:'gold', value:0.10 } },
+  { id:'tickle',  icon:'🦶', name:'搔癢',     rarity:'rare',   source:'egg',
+    hint:'格魯的腳好像怕癢',            buff:{ kind:'fish', value:0.03 } },
+  { id:'curious', icon:'🔢', name:'好奇心',   rarity:'common', source:'egg',
+    hint:'左上角那串數字點久一點會怎樣',  buff:{ kind:'drop', value:0.10 } },
+  { id:'combo',   icon:'🔁', name:'一鏡到底', rarity:'epic',   source:'egg',
+    hint:'一口氣壓 100 下，中間不要停太久', buff:{ kind:'double', value:30 } },
+
+  // ── 商店（用金魚買）2 ──
+  { id:'trophy',  icon:'🏆', name:'獎盃',     rarity:'rare',   source:'shop', gold:5,
+    hint:'商店裡用金魚換',              buff:{ kind:'fish', value:0.05 } },
+  { id:'gem',     icon:'💎', name:'原石',     rarity:'epic',   source:'shop', gold:12,
+    hint:'商店裡用金魚換',              buff:{ kind:'drop', value:0.30 } },
+];
+
+export const SOURCE_LABEL = { drop:'掉落', achieve:'成就', egg:'彩蛋', shop:'商店' };
+export const treasureInfo = id => TREASURES.find(t => t.id === id);
 
 // 商店。cost 是魚；gold=true 的要用金魚買。
 // self=true 代表可以買給自己，give=true 代表可以送人。
