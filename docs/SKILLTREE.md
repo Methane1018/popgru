@@ -74,8 +74,8 @@ v0.9 之前連勝歸零、數字倒退的災難全都出在「絕對值欄位被
 - [x] 1. `config.js`：RARITY 五級、寶物重新分級、新增神話級、`SKILLS`、`SP_STEPS`
 - [x] 2. `store.js`：`skills` 狀態、`spTotal/spLeft/hasSkill/learnSkill`、`buffOf` 併入技能、`rollTreasure` 加權限判定
 - [x] 3. `app.js`：技能面板（要能看到鎖住的節點）
-- [ ] 4. 自動液壓機
-- [ ] 5. 魔法手
+- [x] 4. 自動液壓機
+- [x] 5. 魔法手
 
 ## 之後（v0.11+）
 

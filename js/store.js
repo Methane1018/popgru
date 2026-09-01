@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.9.3';
+} from './config.js?v=0.10.0';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -63,6 +63,7 @@ const blankMe = () => ({
   ownedHats:[], ownedSkins:[], loaded:false,
   treasures:[], skills:[], helped:{}, giftsReceived:0,
   streak:0, bestStreak:0, lastDay:null, todayCount:0, helpToday:0, helpDay:null,
+  magicDay:null,
 });
 const blankGru = () => ({
   uid:null, name:DEFAULT_GRU_NAME, ownerName:null, ownerPhoto:null,
@@ -183,7 +184,7 @@ function outboxSettle(uid, target, n, fish, gold) {
 // 這樣就算伺服器那邊完全沒寫進去，重整也不會掉。
 // 前段是「絕對值」欄位（只有這台裝置在寫，遺失就回不來）；
 // 後段是顯示用的數字，載入時先拿來墊著，免得畫面閃一下 0 再跳回真值。
-const MIRROR_FIELDS = ['streak','bestStreak','lastDay','todayCount','helpToday','helpDay','freezes','double'];
+const MIRROR_FIELDS = ['streak','bestStreak','lastDay','todayCount','helpToday','helpDay','freezes','double','magicDay'];
 const MIRROR_DISPLAY = ['lifetime','fish','goldfish','medals','treasures','skills'];
 const MIRROR_ALL = [...MIRROR_FIELDS, ...MIRROR_DISPLAY];
 
@@ -379,6 +380,7 @@ async function onSignedIn(user) {
         lastDay:d.lastDay||null, todayCount:d.todayCount||0,
         helpToday:d.helpToday||0, helpDay:d.helpDay||null,
         freezes:d.freezes||0, double:d.double||0,
+        magicDay:d.magicDay||null,
       };
       // 本機鏡像只要「不比伺服器舊」就以本機為準。
       // 'YYYY-MM-DD' 直接字串比大小就等於比日期。
@@ -659,7 +661,7 @@ export async function flush() {
       lastSeen: F.serverTimestamp(),
       streak: me.streak, bestStreak: me.bestStreak, lastDay: me.lastDay,
       todayCount: me.todayCount, helpToday: me.helpToday, helpDay: me.helpDay,
-      freezes: me.freezes, double: me.double,
+      freezes: me.freezes, double: me.double, magicDay: me.magicDay,
       ...(patch || {}),
     };
     if (n)    p.lifetime = F.increment(n);
@@ -901,6 +903,47 @@ export const canLearn = id => !skillBlock(id);
 
 // 學會一個技能。跟寶物一樣用 arrayUnion，重複呼叫沒有副作用。
 // 不做洗點：選擇有重量才有意義。
+// 魔法手（社交軸第四層）。一天一次，直接幫某個朋友壓一批，
+// 而且**不吃你自己的幫忙額度** —— 那才是這個技能值 5 點的原因。
+export const magicHandLeft = () =>
+  !grants('magichand') ? 0 : (state.me.magicDay === dayStr() ? 0 : 1);
+
+export async function magicHand(toUid) {
+  if (state.mode !== 'member' || !fb) throw new Error('要登入才能用魔法手');
+  if (!grants('magichand'))   throw new Error('還沒學會魔法手');
+  if (toUid === state.me.uid) throw new Error('魔法手是留給朋友的');
+  if (!magicHandLeft())       throw new Error('今天的魔法手已經用掉了，明天再來');
+
+  const n = TUNING.magicHandHits, me = state.me;
+  await flush();                       // 先把手上的清乾淨，免得跟這批混在一起
+  const { F } = fb;
+  const b = F.writeBatch(fb.db);
+  b.set(gruRef(toUid), { squashes:F.increment(n), lastSquashedAt:F.serverTimestamp() }, { merge:true });
+  b.set(visitRef(toUid, me.uid), {
+    name:me.name, photo:me.photo, count:F.increment(n), at:F.serverTimestamp(), magic:true,
+  }, { merge:true });
+  b.set(globalRef(), {
+    squashes:F.increment(n), lastSquasher:{ uid:me.uid, name:me.name, at:Date.now() },
+  }, { merge:true });
+  b.set(userRef(me.uid), {
+    lifetime:F.increment(n), fish:F.increment(n),
+    magicDay:dayStr(), ['helped.' + toUid]:F.increment(n),
+  }, { merge:true });
+  b.set(F.doc(inboxCol(toUid)), {
+    from:me.uid, fromName:me.name, type:'magichand', hits:n,
+    at:F.serverTimestamp(), read:false,
+  });
+  await b.commit();
+
+  // 寫成功才動本機，畫面才不會先跳一個還沒發生的數字
+  me.magicDay = dayStr();
+  me.lifetime += n; me.fish += n;
+  me.helped = { ...(me.helped || {}), [toUid]: (me.helped?.[toUid] || 0) + n };
+  checkAchievements();
+  sync();
+  return n;
+}
+
 export function learnSkill(id) {
   const why = skillBlock(id);
   if (why) throw new Error(why);

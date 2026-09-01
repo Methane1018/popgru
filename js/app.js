@@ -1,13 +1,14 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.9.3';
+import * as S from './store.js?v=0.10.0';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
   TREASURES, RARITY, SOURCE_LABEL, treasureHow,
-} from './config.js?v=0.9.3';
+  SKILLS, AXES, SP_STEPS, skillPrereq,
+} from './config.js?v=0.10.0';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -156,7 +157,7 @@ function checkEggs(ev, r) {
   if (comboRun >= 100) S.unlockTreasure('combo');
 }
 
-function press(ev) {
+function press(ev, auto) {
   if (pointerDown || stuck) return;      // 擋的是「按住不放」，不是「按太快」
   pointerDown = true;
   clearTimeout(releaseTimer);
@@ -181,7 +182,7 @@ function press(ev) {
     }, 3000);
     return;
   }
-  checkEggs(ev, r);
+  if (!auto) checkEggs(ev, r);      // 彩蛋是給人做的，自動壓不算
   if (r.newDay && r.streakEvent) announceStreak(r.streakEvent);
   if (r.capped) toast(r.capped === 'help'
     ? '今天幫忙的額度用完了，明天再來幫他'
@@ -359,9 +360,9 @@ function renderPanel(name) {
   const body = $('sheetBody'); body.innerHTML = '';
   $('sheetTitle').textContent =
     { people:'大家的格魯', items:'道具', wardrobe:'裝扮', codex:'圖鑑', inbox:'信箱',
-      me:'我的格魯', changelog:'更新內容' }[name] || '';
+      skills:'技能', me:'我的格魯', changelog:'更新內容' }[name] || '';
   ({ people: panelPeople, items: panelItems, wardrobe: panelWardrobe, codex: panelCodex,
-     inbox: panelInbox, me: panelMe, changelog: panelChangelog })[name]?.(body);
+     inbox: panelInbox, skills: panelSkills, me: panelMe, changelog: panelChangelog })[name]?.(body);
 }
 
 /* --- 外觀 --- */
@@ -629,8 +630,9 @@ function dexDetailView(body, t) {
   head.append(el('div', 'dex-detail-icon' + (has ? '' : ' locked'), has ? t.icon : '❔'));
   head.append(el('div', 'dex-detail-name', has ? t.name : '???'));
   const tags = el('div', 'dex-detail-tags');
-  const rar = el('span', 'dex-rar', RARITY[t.rarity].name);
-  rar.style.background = RARITY[t.rarity].color;
+  const showRar = has || S.grants('hintRarity');
+  const rar = el('span', 'dex-rar', showRar ? RARITY[t.rarity].name : '稀有度未知');
+  rar.style.background = showRar ? RARITY[t.rarity].color : 'var(--muted)';
   tags.append(rar, el('span', 'dex-rar src', SOURCE_LABEL[t.source]));
   head.append(tags);
   body.append(head);
@@ -700,8 +702,10 @@ function panelCodex(body) {
     cell.append(el('div', 'dex-icon', has ? t.icon : '❔'));
     cell.append(el('div', 'dex-name', has ? t.name : '???'));
 
-    const rar = el('span', 'dex-rar', RARITY[t.rarity].name);
-    rar.style.background = RARITY[t.rarity].color;
+    // 還沒拿到的格子預設不透露稀有度，要在探寶軸點出「📖 線索」才看得到
+    const showRar = has || S.grants('hintRarity');
+    const rar = el('span', 'dex-rar', showRar ? RARITY[t.rarity].name : '？');
+    rar.style.background = showRar ? RARITY[t.rarity].color : 'var(--muted)';
     cell.append(rar);
 
     // 未解鎖給線索但不給增益 —— 有方向，仍然要自己動手
@@ -729,6 +733,115 @@ function buffText(t) {
     freezeOff: `凍結卡便宜 ${Math.round(v*100)}%`,
     giftOff:   `道具便宜 ${Math.round(v*100)}%`,
   }[t.buff.kind] || '';
+}
+
+/* --- 技能樹 --- */
+// 設計理由見 docs/SKILLTREE.md。這個面板最重要的工作不是讓你點技能，
+// 是讓你「看見還點不到的那三個」—— 那個還不行就是深度本身。
+let skillDetail = null;
+
+// 下一點技能點還要壓幾下（門檻與里程碑合起來算）
+const nextSpAt = () => {
+  const n = S.state.me.lifetime || 0;
+  return [...SP_STEPS, ...MILESTONES.map(m => m.at)]
+    .filter(x => x > n).sort((a, b) => a - b)[0] || null;
+};
+
+function panelSkills(body) {
+  if (skillDetail) {
+    const sk = SKILLS.find(x => x.id === skillDetail);
+    if (sk) return skillDetailView(body, sk);
+    skillDetail = null;
+  }
+
+  const sum = el('div', 'sk-sum');
+  sum.append(el('div', 'sk-sp', String(S.spLeft())));
+  sum.append(el('div', 'sk-sp-label', `可用技能點　·　總共拿到 ${S.spTotal()} 點`));
+  body.append(sum);
+
+  const nx = nextSpAt();
+  body.append(el('p', 'note', nx
+    ? `再壓 ${nf(nx - (S.state.me.lifetime || 0))} 下拿到下一點`
+    : '技能點已經全部拿到了'));
+
+  for (const [key, ax] of Object.entries(AXES)) {
+    const wrap = el('div', 'sk-axis');
+    const head = el('div', 'sk-head');
+    const name = el('b', null, `${ax.icon} ${ax.name}`);
+    name.style.color = ax.color;
+    head.append(name, el('span', 'sk-blurb', ax.blurb));
+    wrap.append(head);
+
+    const path = el('div', 'sk-path');
+    for (const sk of SKILLS.filter(x => x.axis === key).sort((a, b) => a.tier - b.tier)) {
+      // 四種狀態要分得出來。少了 near，「前置還沒學」跟「只是點數不夠」
+      // 會灰成同一個樣子，看不出哪一個才是眼前那個目標。
+      const got = S.hasSkill(sk.id), ready = S.canLearn(sk.id);
+      const pre = skillPrereq(sk);
+      const near = !got && !ready && (!pre || S.hasSkill(pre));   // 路通了，只差點數
+      const n = el('div', 'sk-node ' + (got ? 'got' : ready ? 'ready' : near ? 'near' : 'locked'));
+      if (got) n.style.borderColor = ax.color;
+      // 學不起的也照樣顯示圖示和名字，只是灰掉 ——
+      // 藏起來就沒有「我想要那個」的感覺了
+      n.append(el('div', 'sk-icon', sk.icon));
+      n.append(el('div', 'sk-name', sk.name));
+      n.append(el('div', 'sk-cost', got ? '已學會' : near ? `差 ${sk.cost - S.spLeft()} 點` : `${sk.cost} 點`));
+      n.tabIndex = 0;
+      n.setAttribute('role', 'button');
+      const open = () => { skillDetail = sk.id; subView = true; renderPanel('skills'); };
+      n.onclick = open;
+      n.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+      path.append(n);
+    }
+    wrap.append(path);
+    body.append(wrap);
+  }
+
+  body.append(el('p', 'note', '學會之後不能重來。要走哪條路是一個真的選擇。'));
+}
+
+function skillDetailView(body, sk) {
+  const ax = AXES[sk.axis], got = S.hasSkill(sk.id), why = S.skillBlock(sk.id);
+
+  const back = el('button', 'btn', '← 回技能');
+  back.onclick = () => { skillDetail = null; subView = false; renderPanel('skills'); };
+  body.append(back);
+
+  const head = el('div', 'dex-detail');
+  head.append(el('div', 'dex-detail-icon' + (got ? '' : ' locked'), sk.icon));
+  head.append(el('div', 'dex-detail-name', sk.name));
+  const tags = el('div', 'dex-detail-tags');
+  const a = el('span', 'dex-rar', `${ax.icon} ${ax.name}`);
+  a.style.background = ax.color;
+  tags.append(a, el('span', 'dex-rar src', `第 ${sk.tier} 層 · ${sk.cost} 點`));
+  head.append(tags);
+  body.append(head);
+
+  body.append(el('p', 'note', '效果'));
+  body.append(el('p', 'dex-line', sk.desc));
+
+  if (got) { body.append(el('p', 'dex-line ok', '✓ 已經學會了')); return; }
+
+  body.append(el('p', 'note', '目前'));
+  body.append(el('p', 'dex-line', `你有 ${S.spLeft()} 點可用`));
+
+  const b = el('button', 'btn primary', why || `學會（花 ${sk.cost} 點）`);
+  b.disabled = !!why;
+  // 學了不能反悔，所以要按兩次才算數 —— 跟外觀的預覽再確認同一個道理
+  b.onclick = () => {
+    if (b.dataset.armed !== '1') {
+      b.dataset.armed = '1';
+      b.textContent = `確定學「${sk.name}」？不能反悔（再按一次）`;
+      b.classList.add('danger');
+      return;
+    }
+    try {
+      S.learnSkill(sk.id);
+      toast(`學會了 ${sk.icon} ${sk.name}`);
+      skillDetail = null; subView = false; renderPanel('skills');
+    } catch (e) { toast(e.message); }
+  };
+  body.append(b);
 }
 
 /* --- 更新內容 --- */
@@ -780,6 +893,24 @@ function panelPeople(body) {
       catch (e) { toast(e.message); }
     };
     acts.append(poke);
+
+    // 👋 魔法手（社交軸第四層）。沒學會就完全不顯示 ——
+    // 學會之後名單長出一顆新按鈕，那個「多了東西」本身就是回報。
+    if (S.grants('magichand')) {
+      const mh = el('button', 'btn small', '👋');
+      mh.title = `魔法手：直接幫壓 ${TUNING.magicHandHits} 下，不算你的額度（一天一次）`;
+      mh.disabled = !S.magicHandLeft();
+      mh.onclick = async () => {
+        mh.disabled = true;
+        try {
+          const n = await S.magicHand(g.uid);
+          toast(`留了一隻手在 ${who(g.ownerName)} 家，幫壓了 ${n} 下`);
+          refreshPanel('people');
+        } catch (e) { toast(e.message); mh.disabled = !S.magicHandLeft(); }
+      };
+      acts.append(mh);
+    }
+
     row.append(acts);
     body.append(row);
   }
@@ -850,13 +981,17 @@ function drawInbox(body) {
   if (!st.inbox.length) { body.append(el('p', 'empty', '信箱是空的。去幫別人壓幾下，通常就會有回音。')); return; }
 
   for (const m of st.inbox) {
-    const item = ITEMS[m.type] || { emoji:'❔', name:m.type };
+    // 魔法手不是道具，是通知，所以 ITEMS 裡沒有它
+    const item = ITEMS[m.type] || (m.type === 'magichand'
+      ? { emoji:'👋', name:'魔法手' } : { emoji:'❔', name:m.type });
     const row = el('div', 'row');
     row.append(el('div', 'row-av big', item.emoji));
     const mid = el('div', 'row-mid');
     const verb = { poke:'戳了你一下', note:'留了一句話', fish:'送你魚',
                    freeze:'送你凍結卡', hat:'扣了頂帽子在你頭上',
-                   double:'送你雙倍魚', medal:'頒了金牌給你' }[m.type] || '送了東西';
+                   double:'送你雙倍魚', medal:'頒了金牌給你',
+                   magichand:`留了一隻魔法手，幫你壓了 ${m.hits || TUNING.magicHandHits} 下`,
+                 }[m.type] || '送了東西';
     const nm = senderName(m.from, m.fromName);
     mid.append(el('div', 'row-title', `${nm.now} ${verb}`));
     mid.append(el('div', 'row-sub', [
@@ -866,7 +1001,7 @@ function drawInbox(body) {
     ].filter(Boolean).join(' · ')));
     row.append(mid);
 
-    if (m.from && m.from !== st.me.uid) {          // 回禮永遠比主動送容易
+    if (m.from && m.from !== st.me.uid && m.type !== 'magichand') {   // 回禮永遠比主動送容易
       const back = el('button', 'btn small', '回丟');
       back.onclick = () => showGivePicker(m.type === 'poke' ? 'poke' : m.type);
       if (m.type === 'poke') back.onclick = async () => {
@@ -961,6 +1096,19 @@ $('navPeople').onclick = () => { showPanel('people'); S.loadRoster().then(() => 
 $('navItems').onclick    = () => { showPanel('items'); S.loadRoster(); };
 $('navWardrobe').onclick = () => showPanel('wardrobe');
 $('navCodex').onclick    = () => showPanel('codex');
+
+/* 自動液壓機（壓製軸第四層）。故意保守：
+   只在分頁看得見、只在自己家、按住或攤平時讓開，而且不觸發彩蛋。
+   它是「掛著會慢慢累積」，不是拿來取代手動的。                        */
+setInterval(() => {
+  if (!S.grants('autopress')) return;
+  if (document.visibilityState !== 'visible') return;
+  if (!S.state.viewing.isMine) return;
+  if (previewing || stuck || pointerDown) return;
+  press(null, true);
+  setTimeout(release, 140);
+}, TUNING.autopressMs);
+$('navSkills').onclick   = () => { skillDetail = null; showPanel('skills'); };
 $('navInbox').onclick  = () => {
   showPanel('inbox');
   // 也要名單才查得到寄件人現在的名字

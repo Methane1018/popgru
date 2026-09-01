@@ -174,5 +174,72 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   }
 }
 
+// ── 技能樹 ──────────────────────────────────────────────────────────────
+{
+  const block = (cfg.match(/export const SKILLS = \[(.*?)\n\];/s) || ['',''])[1];
+  const nodes = [...block.matchAll(
+    /id:'(\w+)',\s*axis:'(\w+)',\s*tier:(\d+),\s*cost:(\d+)/g)]
+    .map(m => ({ id:m[1], axis:m[2], tier:+m[3], cost:+m[4] }));
+
+  check('讀得到技能節點', nodes.length > 0, String(nodes.length));
+
+  // 每個節點一定要有效果。沒有的話按下去什麼都不會發生，
+  // 而且畫面上看不出來 —— 這正是「送人」按鈕壞掉兩個版本的那一類故障。
+  const bodies = block.split(/(?=\{ id:')/).filter(x => x.includes("id:'"));
+  const noEffect = bodies.filter(b => !/buff:\s*\{/.test(b) && !/grants:'/.test(b))
+                         .map(b => (b.match(/id:'(\w+)'/) || [])[1]);
+  check('每個技能都有效果（buff 或 grants）', !noEffect.length, String(noEffect));
+
+  // grants 是「權限」字串，一定要有程式碼真的去問它。
+  // 少了這條，就會出現一個點得下去、但什麼也不會發生的大招。
+  const granted = [...block.matchAll(/grants:'(\w+)'/g)].map(m => m[1]);
+  const asked = new Set([
+    ...[...(app + store).matchAll(/grants\(['"](\w+)['"]\)/g)].map(m => m[1]),
+    ...[...cfg.matchAll(/needs:'(\w+)'/g)].map(m => m[1]),
+  ]);
+  const dead = granted.filter(g => !asked.has(g));
+  check('每個 grants 都真的有程式碼在用', !dead.length, `沒人問過：${dead}`);
+
+  // 反過來也要成立：問了一個沒有任何技能給得出來的權限 = 永遠拿不到
+  const askedOnly = [...asked].filter(a => !granted.includes(a));
+  check('問到的權限都有技能給得出來', !askedOnly.length, `沒有技能給：${askedOnly}`);
+
+  // 稀有度的 needs 必須對得上某個技能的 grants，
+  // 否則那一級寶物就是「永遠不會掉」而不是「後期解鎖」
+  const needs = [...cfg.matchAll(/needs:'(\w+)'/g)].map(m => m[1]);
+  check('稀有度的門檻都有技能解得開',
+        needs.every(n => granted.includes(n)), String(needs.filter(n => !granted.includes(n))));
+
+  // 每軸的層級要是連續的 1..N，中間缺一層就會永遠卡住點不下去
+  const axes = [...new Set(nodes.map(n => n.axis))];
+  for (const a of axes) {
+    const t = nodes.filter(n => n.axis === a).map(n => n.tier).sort((x,y) => x-y);
+    check(`技能軸 ${a} 的層級連續`, t.every((v,i) => v === i+1), t.join(','));
+  }
+
+  // 三條軸花費相同，才不會有哪一條先天划算
+  const costs = axes.map(a => nodes.filter(n => n.axis === a).reduce((s,n) => s+n.cost, 0));
+  check('每條軸的總花費相同', new Set(costs).size === 1, costs.join('/'));
+
+  // 每個軸都要在 AXES 裡有定義（名稱、顏色、說明），否則面板會畫出 undefined
+  const axDef = (cfg.match(/export const AXES = \{(.*?)\n\};/s) || ['',''])[1];
+  const missing = axes.filter(a => !new RegExp('\\b' + a + ':').test(axDef));
+  check('每條軸都有 AXES 定義', !missing.length, String(missing));
+
+  // 技能點永遠不該夠點滿整棵樹 —— 點不滿是這個設計的重點
+  const steps = ((cfg.match(/export const SP_STEPS = \[(.*?)\];/s) || ['',''])[1]
+                 .match(/\d+/g) || []).length;
+  const miles = ((cfg.match(/export const MILESTONES = \[(.*?)\n\];/s) || ['',''])[1]
+                 .match(/at:/g) || []).length;
+  const treeCost = nodes.reduce((s,n) => s+n.cost, 0);
+  check('技能點永遠不夠點滿整棵樹', steps + miles < treeCost, `${steps + miles} vs ${treeCost}`);
+
+  // 技能的 buff.kind 要真的有人查詢，不然那個數值是白寫的
+  const kinds = [...block.matchAll(/buff:\s*\{ kind:'(\w+)'/g)].map(m => m[1]);
+  const queried = new Set([...store.matchAll(/buffOf\('(\w+)'\)/g)].map(m => m[1]));
+  const unused = [...new Set(kinds)].filter(k => !queried.has(k));
+  check('技能的 buff kind 都有人查詢', !unused.length, String(unused));
+}
+
 console.log(bad ? `\n${bad} 項沒過` : '\n全部通過');
 process.exit(bad ? 1 : 0);
