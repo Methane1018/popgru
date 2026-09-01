@@ -66,6 +66,13 @@ const check = (name, ok, detail = '') => {
         /const targetUid = v\.isMine \? \(state\.me\.uid \|\| v\.uid\) : v\.uid;/.test(store));
   check('待送匣記的是同一個對象', /outboxAdd\(me\.uid, flushTarget,/.test(store));
   check('待送匣不收空對象', /if \(!uid \|\| !target\) return;/.test(store));
+  // 這些函式都不該 await Firestore 寫入：離線時寫入會被排隊而不是失敗，
+  // await 下去整個函式卡住，呼叫端的重畫也不會執行。
+  for (const fn of ['setNick', 'setGruName', 'setHat', 'setSkin', 'buySkin', 'buyForSelf']) {
+    const m = store.match(new RegExp('function ' + fn + '\\([^)]*\\) \\{([\\s\\S]*?)\\n\\}', 'm'));
+    check(`${fn} 不 await Firestore 寫入`,
+          !m || !/await\s+(fb\.)?F\.setDoc/.test(m[1]));
+  }
   // 登入當下還不知道暱稱（個人資料快照未到），那時寫 ownerName 會把暱稱蓋掉
   check('onSignedIn 不寫 ownerName',
         !/setDoc\(gruRef\(uid\),\s*\{ ownerName/.test(store));

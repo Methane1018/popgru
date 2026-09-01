@@ -9,7 +9,7 @@ import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
   TREASURES, RARITY, treasureInfo, SKINS,
-} from './config.js?v=0.9.0';
+} from './config.js?v=0.9.1';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -854,6 +854,18 @@ export function buffOf(kind) {
 }
 
 export const helpedCount = () => Object.keys(state.me.helped || {}).length;
+
+// 道具的實際價格。畫面和扣款都走這裡，兩邊才不會講不一樣的數字。
+//   🧊 碎冰  → 凍結卡打折
+//   🎁 人緣  → 其他道具打折
+// 金魚價不打折（金魚太難拿，再打折就沒有份量了）
+export function itemCost(key) {
+  const item = ITEMS[key];
+  if (!item || !item.cost) return 0;
+  if (item.gold) return item.cost;
+  const off = key === 'freeze' ? buffOf('freezeOff') : buffOf('giftOff');
+  return Math.max(1, Math.round(item.cost * (1 - off)));
+}
 export const bestHelped  = () => Math.max(0, ...Object.values(state.me.helped || {}));
 
 // 解鎖一個寶物。重複呼叫沒有副作用。
@@ -966,8 +978,9 @@ export async function sendItem(toUid, key, extra = {}) {
   if (toUid === state.me.uid)           throw new Error('不能送給自己');
   if (key === 'poke' && !canPoke(toUid)) throw new Error('剛剛才戳過，等一下再戳');
 
+  const cost = itemCost(key);
   const bal = item.gold ? state.me.goldfish : state.me.fish;
-  if (item.cost > 0 && bal < item.cost) throw new Error(item.gold ? '金魚不夠' : '魚不夠');
+  if (cost > 0 && bal < cost) throw new Error(item.gold ? '金魚不夠' : '魚不夠');
 
   await flush();
   const { F } = fb;
@@ -976,21 +989,26 @@ export async function sendItem(toUid, key, extra = {}) {
     from:state.me.uid, fromName:state.me.name, type:key,
     at:F.serverTimestamp(), read:false, ...extra,
   });
-  if (item.cost > 0) {
+  if (cost > 0) {
     b.set(userRef(state.me.uid),
-      item.gold ? { goldfish:F.increment(-item.cost) } : { fish:F.increment(-item.cost) },
+      item.gold ? { goldfish:F.increment(-cost) } : { fish:F.increment(-cost) },
       { merge:true });
   }
   await b.commit();
+  // 寫入成功之後才扣本機，畫面才會馬上更新。
+  // 之前完全沒扣，要等快照繞一圈回來，看起來就像「買了但魚沒變」。
+  // 也不能在 commit 之前扣：那樣期間來的快照會拿舊的伺服器值把畫面拉回去。
+  if (cost > 0) {
+    if (item.gold) state.me.goldfish -= cost; else state.me.fish -= cost;
+    sync();
+  }
   if (key === 'poke') markPoke(toUid);
 }
 
 export async function buyForSelf(key, extra = {}) {
   const item = ITEMS[key], me = state.me;
   if (!item?.self)        throw new Error('這個不能買給自己');
-  // 🧊 碎冰讓凍結卡打折
-  const off  = key === 'freeze' ? buffOf('freezeOff') : 0;
-  const cost = Math.max(1, Math.round(item.cost * (1 - off)));
+  const cost = itemCost(key);
   if (me.fish < cost) throw new Error('魚不夠');
 
   me.fish -= cost;
@@ -1000,11 +1018,13 @@ export async function buyForSelf(key, extra = {}) {
 
   if (state.mode === 'member' && fb) {
     const { F } = fb;
-    const p = { fish:F.increment(-item.cost) };
+    const p = { fish:F.increment(-cost) };        // 要跟本機扣的一致，不能用原價
     if (key === 'freeze') p.freezes = me.freezes;
     if (key === 'double') p.double  = me.double;
-    try { await F.setDoc(userRef(me.uid), p, { merge:true }); }
-    catch (e) { console.warn('購買寫入失敗：', e); }
+    // 不 await：Firestore 離線時會把寫入排隊而不是失敗，
+    // await 下去整個函式就卡住，呼叫端的重畫也永遠不會執行。
+    F.setDoc(userRef(me.uid), p, { merge:true })
+      .catch(e => console.warn('購買寫入失敗：', e));
   } else { saveGuest(); }
 }
 

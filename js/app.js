@@ -1,13 +1,13 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.9.0';
+import * as S from './store.js?v=0.9.1';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
   TREASURES, RARITY, SOURCE_LABEL,
-} from './config.js?v=0.9.0';
+} from './config.js?v=0.9.1';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -667,7 +667,15 @@ function panelItems(body) {
     const row = el('div', 'row');
     row.append(el('div', 'row-av big', item.emoji));
     const mid = el('div', 'row-mid');
-    mid.append(el('div', 'row-title', `${item.name} · ${item.cost}${item.gold ? ' 🥇' : ' 🐟'}`));
+    // 價格走 store 的 itemCost，畫面和扣款才不會講不一樣的數字
+    const price = S.itemCost(key), unit = item.gold ? ' 🥇' : ' 🐟';
+    const title = el('div', 'row-title');
+    title.append(`${item.name} · ${price}${unit}`);
+    if (price < item.cost) {                       // 有寶物折扣就把原價劃掉
+      const was = el('span', 'was', `${item.cost}${unit}`);
+      title.append(' ', was);
+    }
+    mid.append(title);
     mid.append(el('div', 'row-sub', item.desc));
     row.append(mid);
 
@@ -675,8 +683,10 @@ function panelItems(body) {
     if (item.self) {
       const b = el('button', 'btn small', '買給自己');
       b.onclick = async () => {
-        try { await S.buyForSelf(key); toast(`買了 ${item.name}`); renderPanel('items'); }
+        b.disabled = true;
+        try { await S.buyForSelf(key); toast(`買了 ${item.name}`); }
         catch (e) { toast(e.message); }
+        renderPanel('items');                      // 不管成敗都重畫，魚的數字才會即時更新
       };
       acts.append(b);
     }
