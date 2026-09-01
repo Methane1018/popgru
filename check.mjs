@@ -81,6 +81,10 @@ const check = (name, ok, detail = '') => {
   // 預覽時商店必須收起來，否則面板會把企鵝整個遮住，等於看不到預覽
   check('預覽會收起商店面板', /\$\('sheet'\)\.classList\.remove\('open'\);[\s\S]{0,200}previewVeil/.test(app));
   check('預覽罩點任何地方都能結束', /\$\('previewVeil'\)\.onclick = \(\) => exitPreview\(\)/.test(app));
+  // 帽子存在 gru.hat 而不是 gru.skin，所以套用外觀一定要走 wornSkin()，
+  // 直接傳 .skin 會讓帽子（和手持物的預設值）被填成 none 而消失
+  check('applySkin 不直接吃 .skin',
+        !/applySkin\((?:S\.)?state\.viewing\.skin\)|applySkin\(v\.skin\)/.test(app));
   check('關閉面板會收掉預覽罩',
         /function closePanel\(\) \{[\s\S]{0,200}?exitPreview\(false\)/.test(app));
   check('補送會把 null 對象算回自己', /t === 'null' \|\| t === 'undefined'/.test(store));

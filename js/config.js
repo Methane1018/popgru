@@ -26,6 +26,12 @@ export const firebaseConfig = {
 //  （順序是刻意的：不寫更新內容就升不了版。）
 // ----------------------------------------------------------------------------
 export const CHANGELOG = [
+  { v:'0.9.2', date:'2026-09-01', notes:[
+    '修好預覽帽子但沒買、離開之後原本戴的帽子會消失',
+    '彩蛋的線索改得隱晦了，原本那四句根本是說明書',
+    '點圖鑑裡的任何一格可以看細節，解鎖後會揭曉「當初是怎麼拿到的」',
+    '裝扮的帽子和手持物現在直接顯示名字，不用滑鼠停留才看得到',
+  ]},
   { v:'0.9.1', date:'2026-09-01', notes:[
     '修好送東西給別人之後，魚的數量不會馬上更新',
     '🎁 人緣的「道具便宜 10%」原本沒有真的生效，現在會了',
@@ -235,14 +241,20 @@ export const TREASURES = [
     hint:'集滿所有帽子',               buff:{ kind:'fish', value:0.05 } },
 
   // ── 彩蛋 4 ──
+  // 彩蛋的 hint 是「還沒拿到時」看到的，要隱晦；
+  // how 是「拿到之後」才揭曉的真正做法 —— 不然不知不覺解鎖的人不知道發生了什麼。
   { id:'oclock',  icon:'🕛', name:'準時',     rarity:'rare',   source:'egg',
-    hint:'在某個整點剛過的時候壓一下',   buff:{ kind:'gold', value:0.10 } },
+    hint:'分針歸零的那一刻',
+    how:'在整點過後的那一分鐘之內壓一下',        buff:{ kind:'gold', value:0.10 } },
   { id:'tickle',  icon:'🦶', name:'搔癢',     rarity:'rare',   source:'egg',
-    hint:'格魯的腳好像怕癢',            buff:{ kind:'fish', value:0.03 } },
+    hint:'別老是打頭',
+    how:'連續戳格魯的腳 10 下',                  buff:{ kind:'fish', value:0.03 } },
   { id:'curious', icon:'🔢', name:'好奇心',   rarity:'common', source:'egg',
-    hint:'左上角那串數字點久一點會怎樣',  buff:{ kind:'drop', value:0.10 } },
+    hint:'有些數字禁不起反覆敲打',
+    how:'快速連點左上角的版本號 5 下',           buff:{ kind:'drop', value:0.10 } },
   { id:'combo',   icon:'🔁', name:'一鏡到底', rarity:'epic',   source:'egg',
-    hint:'一口氣壓 100 下，中間不要停太久', buff:{ kind:'double', value:30 } },
+    hint:'別停下來',
+    how:'一口氣壓 100 下，中間不能停超過 2 秒',   buff:{ kind:'double', value:30 } },
 
   // ── 商店（用金魚買）2 ──
   { id:'trophy',  icon:'🏆', name:'獎盃',     rarity:'rare',   source:'shop', gold:5,
@@ -253,6 +265,8 @@ export const TREASURES = [
 
 export const SOURCE_LABEL = { drop:'掉落', achieve:'成就', egg:'彩蛋', shop:'商店' };
 export const treasureInfo = id => TREASURES.find(t => t.id === id);
+// 拿到之後看到的說明。彩蛋才需要另寫，其他的條件本身就是提示。
+export const treasureHow = t => t.how || t.hint;
 
 // 商店。cost 是魚；gold=true 的要用金魚買。
 // self=true 代表可以買給自己，give=true 代表可以送人。

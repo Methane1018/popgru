@@ -9,7 +9,7 @@ import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin,
   TREASURES, RARITY, treasureInfo, SKINS,
-} from './config.js?v=0.9.1';
+} from './config.js?v=0.9.2';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';

@@ -1,13 +1,13 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.9.1';
+import * as S from './store.js?v=0.9.2';
 import {
   TUNING, ITEMS, MILESTONES, HATS,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
-  TREASURES, RARITY, SOURCE_LABEL,
-} from './config.js?v=0.9.1';
+  TREASURES, RARITY, SOURCE_LABEL, treasureHow,
+} from './config.js?v=0.9.2';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -382,7 +382,9 @@ function skinPickerState() {
 function clearSkinPreview() {
   if (!skinPreview) return;
   skinPreview = null;
-  applySkin(S.state.viewing.skin);        // 還原成真正存起來的樣子
+  // 一定要用 wornSkin：帽子存在 gru.hat，不在 gru.skin 裡面。
+  // 直接傳 .skin 的話 defaultSkin() 會把 hat 補成 'none'，原本戴的帽子就不見了。
+  applySkin(S.wornSkin(S.state.viewing));
 }
 
 // 全畫面預覽：把商店收起來讓你真的看得到企鵝。
@@ -461,7 +463,9 @@ function panelWardrobe(body) {
 
     if (locked) {
       b.disabled = true;
-      cell.append(b, el('span', 'hat-need', nf(item.need)));
+      cell.append(b);
+      if (kind === 'hat' || kind === 'hold') cell.append(el('span', 'cell-name', item.name));
+      cell.append(el('span', 'hat-need', nf(item.need)));
     } else {
       b.onclick = () => {                       // 只預覽，不扣錢
         skinPreview = { ...(skinPreview || {}), [kind]: item.id };
@@ -469,7 +473,10 @@ function panelWardrobe(body) {
         renderPanel('wardrobe');
       };
       if (!has && st.me.fish < item.cost) b.classList.add('poor');
-      cell.append(b, el('span', 'hat-need',
+      cell.append(b);
+      // 帽子和手持物只有一個符號，名字不能只放在 title —— 手機上看不到
+      if (kind === 'hat' || kind === 'hold') cell.append(el('span', 'cell-name', item.name));
+      cell.append(el('span', 'hat-need',
         inUse ? '使用中' : has ? '已擁有' : `${item.cost} 🐟`));
     }
     grid.append(cell);
@@ -524,10 +531,52 @@ function panelWardrobe(body) {
 
 
 /* --- 圖鑑 --- */
-let dexFilter = 'all';
+let dexFilter = 'all', dexDetail = null;
+
+// 點任何一格看細節。手機上不能靠滑鼠停留，所以細節一定要點得開，
+// 而且解鎖後要看得到「當初是怎麼拿到的」—— 不然不知不覺解鎖的人一頭霧水。
+function dexDetailView(body, t) {
+  const has = S.hasTreasure(t.id);
+  const back = el('button', 'btn', '← 回圖鑑');
+  back.onclick = () => { dexDetail = null; renderPanel('codex'); };
+  body.append(back);
+
+  const head = el('div', 'dex-detail');
+  head.append(el('div', 'dex-detail-icon' + (has ? '' : ' locked'), has ? t.icon : '❔'));
+  head.append(el('div', 'dex-detail-name', has ? t.name : '???'));
+  const tags = el('div', 'dex-detail-tags');
+  const rar = el('span', 'dex-rar', RARITY[t.rarity].name);
+  rar.style.background = RARITY[t.rarity].color;
+  tags.append(rar, el('span', 'dex-rar src', SOURCE_LABEL[t.source]));
+  head.append(tags);
+  body.append(head);
+
+  body.append(el('p', 'note', has ? '怎麼拿到的' : '線索'));
+  body.append(el('p', 'dex-line', has ? treasureHow(t) : t.hint));
+
+  if (has) {
+    body.append(el('p', 'note', '增益'));
+    body.append(el('p', 'dex-line', buffText(t)));
+  } else {
+    body.append(el('p', 'hint-sm', '拿到之後才會知道它有什麼效果。'));
+    if (t.source === 'shop') {
+      const b = el('button', 'btn primary', `用 ${t.gold} 🥇 換`);
+      b.onclick = async () => {
+        try { await S.buyTreasure(t.id); toast(`換到 ${t.icon} ${t.name}`); renderPanel('codex'); }
+        catch (e) { toast(e.message); }
+      };
+      body.append(b);
+    }
+  }
+}
 
 function panelCodex(body) {
   const st = S.state;
+  if (dexDetail) {
+    const t = TREASURES.find(x => x.id === dexDetail);
+    if (t) return dexDetailView(body, t);
+    dexDetail = null;
+  }
   const got = TREASURES.filter(t => S.hasTreasure(t.id));
 
   body.append(el('p', 'note', `收集進度 ${got.length} / ${TREASURES.length}`));
@@ -571,17 +620,15 @@ function panelCodex(body) {
     rar.style.background = RARITY[t.rarity].color;
     cell.append(rar);
 
-    // 未解鎖給提示但不給增益 —— 有方向，仍然要自己動手
+    // 未解鎖給線索但不給增益 —— 有方向，仍然要自己動手
     cell.append(el('div', 'dex-sub', has ? buffText(t) : t.hint));
 
-    if (!has && t.source === 'shop') {
-      const b = el('button', 'dex-buy', `${t.gold} 🥇`);
-      b.onclick = async () => {
-        try { await S.buyTreasure(t.id); toast(`換到 ${t.icon} ${t.name}`); renderPanel('codex'); }
-        catch (e) { toast(e.message); }
-      };
-      cell.append(b);
-    }
+    // 整格可點，手機也用得了
+    cell.tabIndex = 0;
+    cell.setAttribute('role', 'button');
+    const open = () => { dexDetail = t.id; renderPanel('codex'); };
+    cell.onclick = open;
+    cell.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
     grid.append(cell);
   }
   body.append(grid);
