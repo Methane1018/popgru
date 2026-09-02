@@ -1,14 +1,14 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.10.6';
+import * as S from './store.js?v=0.10.7';
 import {
   TUNING, ITEMS, MILESTONES, HATS, clampQty,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
-  TREASURES, RARITY, SOURCE_LABEL, EGG_TAG, treasureHow,
+  TREASURES, RARITY, SOURCE_LABEL, EGG_TAG, tagOf, treasureHow,
   SKILLS, AXES, SP_STEPS, skillPrereq,
-} from './config.js?v=0.10.6';
+} from './config.js?v=0.10.7';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -743,15 +743,11 @@ function dexDetailView(body, t) {
   head.append(el('div', 'dex-detail-icon' + (has ? '' : ' locked'), has ? t.icon : '❔'));
   head.append(el('div', 'dex-detail-name', has ? t.name : '???'));
   const tags = el('div', 'dex-detail-tags');
-  if (t.source === 'egg') {
-    const eg = el('span', 'dex-rar', EGG_TAG.name);
-    eg.style.background = EGG_TAG.color;
-    tags.append(eg);                       // 彩蛋只有這一個標記，不露稀有度
-  } else {
-    const rar = el('span', 'dex-rar', RARITY[t.rarity].name);
-    rar.style.background = RARITY[t.rarity].color;
-    tags.append(rar, el('span', 'dex-rar src', SOURCE_LABEL[t.source]));
-  }
+  const rar = el('span', 'dex-rar', tagOf(t).name);
+  rar.style.background = tagOf(t).color;
+  tags.append(rar);
+  // 彩蛋的標記已經寫著「彩蛋」了，再掛一個來源標籤是重複的
+  if (t.source !== 'egg') tags.append(el('span', 'dex-rar src', SOURCE_LABEL[t.source]));
   head.append(tags);
   body.append(head);
 
@@ -825,15 +821,13 @@ function panelCodex(body) {
     const has = S.hasTreasure(t.id);
     const gate = has ? null : gateOf(t);
     const cell = el('div', 'dex-cell ' + (has ? 'got' : gate ? 'locked gated' : 'locked'));
-    if (has) cell.style.borderColor = RARITY[t.rarity].color;
+    if (has) cell.style.borderColor = tagOf(t).color;
 
     cell.append(el('div', 'dex-icon', has ? t.icon : gate ? '🔒' : '❔'));
     cell.append(el('div', 'dex-name', has ? t.name : '???'));
 
-    // 彩蛋不標稀有度：那會洩漏它有多難，而彩蛋的重點就是自己撞到
-    const isEgg = t.source === 'egg';
-    const rar = el('span', 'dex-rar', isEgg ? EGG_TAG.name : RARITY[t.rarity].name);
-    rar.style.background = isEgg ? EGG_TAG.color : RARITY[t.rarity].color;
+    const rar = el('span', 'dex-rar', tagOf(t).name);
+    rar.style.background = tagOf(t).color;
     cell.append(rar);
 
     // 彩蛋維持隱晦，其他的直接把條件寫出來 ——
@@ -1348,7 +1342,7 @@ S.on('writefail', e => {
 });
 // 單一寶物到手
 S.on('treasure', t => {
-  toast(`${t.icon} 找到「${t.name}」· ${RARITY[t.rarity].name}`);
+  toast(`${t.icon} 找到「${t.name}」· ${tagOf(t).name}`);
   if (navigator.vibrate) { try { navigator.vibrate([15,50,25]); } catch {} }
 });
 // 一次多個（通常是上線時補發的成就）→ 合併成一則，不要洗版

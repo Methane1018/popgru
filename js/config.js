@@ -26,6 +26,9 @@ export const firebaseConfig = {
 //  （順序是刻意的：不寫更新內容就升不了版。）
 // ----------------------------------------------------------------------------
 export const CHANGELOG = [
+  { v:'0.10.7', date:'2026-09-02', notes:[
+    '彩蛋解鎖後的邊框也是粉色的了 —— 它自成一級，不排在稀有度那條線上',
+  ]},
   { v:'0.10.6', date:'2026-09-02', notes:[
     '👋 魔法手大改：不再是一次幫壓幾十下，而是在朋友身上留下一隻手 —— 接下來你在自己家壓的 200 下會同時幫他壓一下。你照常玩，順手就幫到人',
     '新彩蛋一枚。提示：在很久很久以前......',
@@ -343,8 +346,13 @@ export const TREASURES = [
 ];
 
 export const SOURCE_LABEL = { drop:'掉落', achieve:'成就', egg:'彩蛋', shop:'商店' };
-// 彩蛋不標稀有度 —— 稀有度會洩漏它有多難，而彩蛋的重點就是自己撞到
+// 彩蛋自成一級。稀有度會洩漏它有多難，而彩蛋的重點就是自己撞到，
+// 所以它不排在一般／少見／稀有／傳說／神話那條線上，用自己的粉色。
 export const EGG_TAG = { name:'彩蛋', color:'#d4568f' };
+
+// 一個寶物在畫面上的「級別」。邊框、徽章、找到時的提示都走這裡，
+// 才不會有的地方記得換成彩蛋色、有的地方忘了。
+export const tagOf = t => (t.source === 'egg' ? EGG_TAG : RARITY[t.rarity]);
 export const treasureInfo = id => TREASURES.find(t => t.id === id);
 // 拿到之後看到的說明。彩蛋才需要另寫，其他的條件本身就是提示。
 export const treasureHow = t => t.how || t.hint;

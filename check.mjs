@@ -234,9 +234,13 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   const noHow = eggs.filter(b => !/how:'/.test(b)).map(b => (b.match(/id:'(\w+)'/) || [])[1]);
   check('每個彩蛋都有 how', !noHow.length, String(noHow));
 
-  // 彩蛋在圖鑑用自己的標記，不露稀有度
+  // 彩蛋自成一級，畫面上的級別一律走 tagOf()。
+  // 直接讀 RARITY[...].name / .color 就會漏掉彩蛋 ——
+  // 只要有一個地方忘了換，彩蛋的難度就從那裡洩漏出去。
   check('彩蛋有專用標記', /export const EGG_TAG/.test(cfg));
-  check('圖鑑對彩蛋不顯示稀有度', /isEgg \? EGG_TAG\.name : RARITY/.test(app));
+  check('有 tagOf 統一畫面上的級別', /export const tagOf/.test(cfg));
+  const leaks = [...app.matchAll(/RARITY\[[^\]]+\]\.(name|color)/g)].map(m => m[0]);
+  check('畫面上的級別都走 tagOf', !leaks.length, `直接讀了 ${[...new Set(leaks)]}`);
 }
 
 // nav 的按鈕是「圖示 <i> ＋ 標籤 <em>」兩層。
