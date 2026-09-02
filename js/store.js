@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.10.9';
+} from './config.js?v=0.10.10';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -1010,9 +1010,16 @@ export function buffOf(kind) {
 
 export const helpedCount = () => Object.keys(state.me.helped || {}).length;
 
-// 下一條金魚要幾下（🔮 水晶球、🌠 極光、🕛 準時、🪨 重壓 都會讓它變少）
+// 下一條金魚要幾下（🔮 水晶球、🌠 極光、🕛 準時、📜 追本溯源、🪨 重壓 都會讓它變少）
+//
+// ⚠️ 這裡本來是 `門檻 × (1 - 增益)`，而 gold 的增益全部收齊剛好是 1.00 ——
+// 350 × 0 = 0，夾成 1，變成「每點一下掉一條金魚」。
+// `(1 - X)` 這個形式只要 X 逼近 1 就會崩，而收集遊戲的增益本來就會越加越多。
+//
+// 改成除法：X 是「掉落頻率變幾倍」，永遠除不到 0，語意也才對得上
+// 「更容易掉 +25%」＝ 1.25 倍。全部收齊是 2 倍（350 → 175）。
 export const goldfishOdds = () =>
-  Math.max(1, Math.round(TUNING.goldfishOdds * (1 - buffOf('gold'))));
+  Math.max(1, Math.round(TUNING.goldfishOdds / (1 + Math.max(0, buffOf('gold')))));
 // 距離下一條金魚的進度 0～1
 export const goldfishProgress = () =>
   Math.min(1, (state.me.goldTick || 0) / goldfishOdds());
@@ -1150,7 +1157,8 @@ export function itemCost(key) {
   const item = ITEMS[key];
   if (!item || !item.cost) return 0;
   if (item.gold) return item.cost;
-  const off = key === 'freeze' ? buffOf('freezeOff') : buffOf('giftOff');
+  const raw = key === 'freeze' ? buffOf('freezeOff') : buffOf('giftOff');
+  const off = Math.min(TUNING.maxDiscount, Math.max(0, raw));   // 再多也不會變免費
   return Math.max(1, Math.round(item.cost * (1 - off)));
 }
 export const bestHelped  = () => Math.max(0, ...Object.values(state.me.helped || {}));

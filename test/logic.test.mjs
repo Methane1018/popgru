@@ -615,5 +615,57 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   S.state.me.treasures = []; S.state.me.goldfish = 0; S.state.me.fish = 0;
 }
 
+/* ------------------------ 全部收集完也不能玩壞（v0.10.10） -- */
+// 真實災情：gold 增益全部收齊剛好是 1.00，而門檻算式是 `350 × (1 - 增益)`
+//   → 350 × 0 = 0 → 夾成 1 → 每點一下掉一條金魚。
+// `(1 - X)` 這個形式只要 X 逼近 1 就崩，而收集遊戲的增益本來就會越加越多。
+// 這一段的用意是：以後再加任何寶物或技能，只要讓某個算式退化就會在這裡紅。
+{
+  const { TREASURES: ALL, SKILLS: ALLSK, ITEMS: IT } = await import('../js/config.js');
+  const total = kind => [...ALL, ...ALLSK]
+    .filter(x => x.buff && x.buff.kind === kind)
+    .reduce((n, x) => n + x.buff.value, 0);
+
+  // 先把那個「剛好 1.00」記錄下來 —— 它就是踩到地雷的原因
+  ok('★ gold 增益全收齊會達到 1.0（所以除法是必要的）', total('gold') >= 1,
+     String(total('gold')));
+
+  S.state.me.treasures = ALL.map(t => t.id);
+  S.state.me.skills    = ALLSK.map(s => s.id);
+  TUNING.goldfishOdds = 350;
+
+  ok('★ 全收齊時金魚門檻不會退化成 1', S.goldfishOdds() > 1, String(S.goldfishOdds()));
+  ok('★ 全收齊剛好是兩倍速（350 → 175）', S.goldfishOdds() === 175, String(S.goldfishOdds()));
+  ok('★ 進度不會超過 1', S.goldfishProgress() <= 1);
+
+  // 什麼都沒有的時候就是設定值
+  S.state.me.treasures = []; S.state.me.skills = [];
+  ok('沒有增益時就是門檻本身', S.goldfishOdds() === 350, String(S.goldfishOdds()));
+  S.state.me.treasures = ['orb'];                       // 🔮 +20%
+  ok('★ +20% 是 1.2 倍速，不是少 20%', S.goldfishOdds() === Math.round(350 / 1.2),
+     String(S.goldfishOdds()));
+
+  // 就算增益灌到很誇張也不能變成每下一條
+  S.state.me.treasures = ALL.map(t => t.id);
+  S.state.me.skills    = ALLSK.map(s => s.id);
+  ok('★ 東西再多門檻也永遠 ≥ 1', S.goldfishOdds() >= 1);
+
+  // 折扣不能把東西變免費
+  for (const k of Object.keys(IT)) {
+    if (!IT[k].cost) continue;
+    ok(`★ 全收齊時「${IT[k].name}」還是要錢`, S.itemCost(k) >= 1, String(S.itemCost(k)));
+  }
+  ok('★ 折扣有天花板', S.itemCost('note') >= Math.round(IT.note.cost * (1 - TUNING.maxDiscount)),
+     String(S.itemCost('note')));
+
+  // 其他數值也不能爆掉
+  ok('★ 幫忙額度仍然是有限的', Number.isFinite(S.helpCapNow()) && S.helpCapNow() > 0,
+     String(S.helpCapNow()));
+  ok('★ 掉寶機率仍然小於 1', (1 + S.buffOf('drop')) / 300 < 1,
+     String((1 + S.buffOf('drop')) / 300));
+
+  S.state.me.treasures = []; S.state.me.skills = [];
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
