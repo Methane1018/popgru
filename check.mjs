@@ -174,6 +174,19 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   }
 }
 
+// 金魚從「隨機掉落」改成「固定計數」之後，畫面上不能再說它是機率。
+// 說明文字跟實際機制對不起來，比沒有說明還糟。
+{
+  const stale = ['金魚更容易掉', '金魚門檻 -', '金魚出現的機率'];
+  check('畫面上沒有把金魚講成機率', !stale.some(x => app.includes(x)),
+        String(stale.filter(x => app.includes(x))));
+  // 技能說明也一樣
+  const skillBlock = (cfg.match(/export const SKILLS = \[(.*?)\n\];/s) || ['',''])[1];
+  check('技能說明沒有把金魚講成機率',
+        !/金魚出現的機率|金魚更容易掉/.test(skillBlock));
+  check('金魚的增益講的是累積速度', /金魚累積速度/.test(app));
+}
+
 // 增益的算式不能用「門檻 × (1 - 增益)」這種形式：
 // 收集遊戲的增益只會越加越多，X 一逼近 1 整條算式就退化
 //（gold 全收齊剛好是 1.00 → 門檻變 1 → 每點一下掉一條金魚，真的發生過）。

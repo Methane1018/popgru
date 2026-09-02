@@ -1,14 +1,14 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.11.0';
+import * as S from './store.js?v=0.11.1';
 import {
   TUNING, ITEMS, MILESTONES, HATS, clampQty,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
   TREASURES, RARITY, SOURCE_LABEL, EGG_TAG, tagOf, treasureHow,
   SKILLS, AXES, SP_STEPS, skillPrereq,
-} from './config.js?v=0.11.0';
+} from './config.js?v=0.11.1';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -799,7 +799,9 @@ function panelCodex(body) {
     ['fish','壓扁多拿魚', v => `+${Math.round(v*100)}%`],
     ['help','每天幫忙額度', v => `+${nf(v)} 下`],
     ['drop','寶物掉落機率', v => `+${Math.round(v*100)}%`],
-    ['gold','金魚更容易掉', v => `+${Math.round(v*100)}%`],
+    // 這一行有總增益，所以直接把「現在幾下一條」算給人看，比百分比有感
+    ['gold','金魚累積速度', v => `+${Math.round(v*100)}%（每 ${nf(S.goldfishOdds())} 下一條）`],
+    ['flat','格魯攤倒機率', v => `+${Math.round(v*100)}%（約 ${nf(S.flatOdds())} 下一次）`],
     ['double','雙倍卡持續', v => `+${nf(v)} 下`],
     ['freezeOff','凍結卡折扣', v => `-${Math.round(v*100)}%`],
     ['giftOff','道具折扣', v => `-${Math.round(v*100)}%`],
@@ -856,7 +858,8 @@ function buffText(t) {
     fish:      `壓扁多拿 ${Math.round(v*100)}% 魚`,
     help:      `每天多幫 ${nf(v)} 下`,
     drop:      `掉落機率 +${Math.round(v*100)}%`,
-    gold:      `金魚門檻 -${Math.round(v*100)}%`,
+    gold:      `金魚累積速度 +${Math.round(v*100)}%`,
+    flat:      `格魯更常攤 +${Math.round(v*100)}%`,
     double:    `雙倍卡多 ${nf(v)} 下`,
     freezeOff: `凍結卡便宜 ${Math.round(v*100)}%`,
     giftOff:   `道具便宜 ${Math.round(v*100)}%`,

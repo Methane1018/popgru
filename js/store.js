@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.11.0';
+} from './config.js?v=0.11.1';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -633,7 +633,6 @@ export function squash() {
   }
   me.fish += r.gained;
 
-  // 🔮 水晶球、🕛 準時 會讓金魚更容易掉
   // 🥇 金魚：固定每 N 下一條，不是碰運氣。
   // 進度存在 me.goldTick 而不是模組變數，這樣重整之後不會從頭算起 ——
   // 否則畫面上的進度條每次開頁都會歸零，看起來像倒退。

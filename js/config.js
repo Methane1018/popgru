@@ -26,6 +26,10 @@ export const firebaseConfig = {
 //  （順序是刻意的：不寫更新內容就升不了版。）
 // ----------------------------------------------------------------------------
 export const CHANGELOG = [
+  { v:'0.11.1', date:'2026-09-03', notes:[
+    '跟金魚有關的寶物說明改寫（潮邊指出的）—— 金魚現在是固定計數，不該再講成「機率」',
+    '圖鑑的總增益會直接告訴你「現在每幾下一條金魚」',
+  ]},
   { v:'0.11.0', date:'2026-09-03', notes:[
     '「格魯攤在地上」跟「掉金魚」拆開了（潮邊的提議）',
     '🥇 金魚：每 350 下固定掉一條，不再看運氣 —— 進度條看得到還差幾下',
@@ -281,7 +285,8 @@ export const MILESTONES = [
 //    fish    魚產出 +value（比例）
 //    help    每天幫忙額度 +value（次數）
 //    drop    寶物掉落機率 ×(1+value)
-//    gold    金魚門檻 ×(1-value)，越小越容易掉
+//    gold    金魚門檻 ÷(1+value) —— value 是「累積快幾倍」，不是機率
+//    flat    格魯攤倒的機率 ÷(1+value)，同上
 //    double  雙倍卡每次給的次數 +value
 //    freezeOff / giftOff   凍結卡 / 道具打折（比例）
 // ----------------------------------------------------------------------------
@@ -534,7 +539,8 @@ export const SKILLS = [
   { id:'press1',  axis:'press',  tier:1, cost:1, icon:'💪', name:'熟練',
     desc:'每次計分多 10% 的魚',          buff:{ kind:'fish', value:0.10 } },
   { id:'press2',  axis:'press',  tier:2, cost:2, icon:'🪨', name:'重壓',
-    desc:'金魚出現的機率提高 25%',        buff:{ kind:'gold', value:0.25 } },
+    desc:'金魚累積速度 +25% —— 金魚是每壓固定下數就掉一條，這讓那個門檻變短',
+    buff:{ kind:'gold', value:0.25 } },
   { id:'press3',  axis:'press',  tier:3, cost:3, icon:'⚡', name:'連壓',
     desc:'每次計分再多 20% 的魚',         buff:{ kind:'fish', value:0.20 } },
   { id:'press4',  axis:'press',  tier:4, cost:5, icon:'🏗', name:'自動液壓機',
