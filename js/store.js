@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.10.7';
+} from './config.js?v=0.10.8';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -105,8 +105,18 @@ export function helpLeft() {
 function loadGuest() {
   try { return JSON.parse(localStorage.getItem(GUEST_KEY) || '{}'); } catch { return {}; }
 }
+// 畫面上的數字是不是從「會員的本機備份」墊上去的。
+// 是的話，那些數字不是訪客打出來的，絕對不能寫進訪客存檔。
+let mirroredMe = false;
+
 function saveGuest() {
   if (state.mode !== 'guest') return;
+  // ⚠️ 這一行擋掉一個可以無限重複的漏洞：
+  // 開頁時 prefillFromMirror() 會把會員的累計數字填進 state.me（免得畫面閃 0），
+  // 而那時候 Firebase 認證還沒回來，mode 還是 'guest'。
+  // 只要在這個空檔點一下，squash() 就會把「會員的五萬下」存成訪客進度，
+  // 認證一回來 claimGuestProgress() 就把它當新玩家的成果補算 —— 每次重整白拿 3000 下。
+  if (mirroredMe) return;
   const { lifetime, fish, goldfish, streak, bestStreak, lastDay, todayCount, nick, ownedHats } = state.me;
   try {
     localStorage.setItem(GUEST_KEY, JSON.stringify({
@@ -119,6 +129,7 @@ function saveGuest() {
   } catch {}
 }
 function applyGuest() {
+  mirroredMe = false;          // 真的回到訪客身分，數字才又是訪客自己的
   const g = loadGuest();
   Object.assign(state.me, blankMe(), {
     lifetime:g.lifetime||0, fish:g.fish||0, goldfish:g.goldfish||0,
@@ -200,11 +211,15 @@ function mirrorSave() {
 // 載入時先用上次的本機備份把畫面墊起來。
 // 不然從開頁到伺服器回覆的那一兩秒，所有數字都是 0，看起來像東西不見了。
 // 這只是墊著：不設 loaded，所以不會被當成確認過的資料寫回伺服器。
+// 只給測試用：讓測試能重現「畫面被會員備份墊過」的那個狀態
+export const _prefillFromMirrorForTest = () => prefillFromMirror();
+
 function prefillFromMirror() {
   let o = null;
   try { o = JSON.parse(localStorage.getItem(MIRROR_KEY) || 'null'); } catch {}
   if (!o || !o.uid) return false;
   for (const f of MIRROR_ALL) if (o[f] !== undefined) state.me[f] = o[f];
+  mirroredMe = true;          // 從這一刻起，畫面上的數字不是訪客的
   return true;
 }
 
@@ -472,11 +487,21 @@ async function claimGuestProgress(uid) {
   if (!take && !g.fish && !g.goldfish) { try { localStorage.removeItem(GUEST_KEY); } catch {} return null; }
   try {
     const { F } = fb;
+    // 一個帳號只補算一次，永遠。
+    // 「登入時把訪客時期的成果帶進來」本來就是一次性的事情；
+    // 少了這道閘，任何一個讓訪客存檔重新出現的 bug 都會變成無限刷。
+    const u = await F.getDoc(userRef(uid));
+    if (u.exists() && u.data().claimedGuestAt) {
+      console.warn('POPGRU 這個帳號已經補算過訪客紀錄了，略過');
+      try { localStorage.removeItem(GUEST_KEY); } catch {}
+      return null;
+    }
     const b = F.writeBatch(fb.db);
     b.set(userRef(uid), {
       lifetime: F.increment(take),
       fish:     F.increment(Math.min(g.fish||0, TUNING.guestMaxClaim)),
       goldfish: F.increment(Math.min(g.goldfish||0, 50)),
+      claimedGuestAt: F.serverTimestamp(),      // 蓋章，下次就不會再補算
     }, { merge:true });
     if (take > 0) {
       b.set(gruRef(uid),   { squashes: F.increment(take) }, { merge:true });

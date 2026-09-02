@@ -220,6 +220,23 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
         `少了 ${unioned.filter(f => !merged.includes(f))}`);
 }
 
+// 開頁時 prefillFromMirror() 會把會員的累計數字填進 state.me（免得畫面閃 0），
+// 但那時候 Firebase 認證還沒回來，mode 還是 'guest'。
+// 少了 mirroredMe 這道閘，那個空檔裡的任何一次 saveGuest() 都會把
+// 會員的數字存成訪客進度 —— 認證一回來就被當成新玩家的成果補算，
+// 每次重整白拿 guestMaxClaim 下（真的發生過，小圈子總數被灌到十萬）。
+{
+  check('有 mirroredMe 旗標', /let mirroredMe = false/.test(store));
+  check('prefill 之後會標記', /mirroredMe = true/.test(store));
+  check('saveGuest 會擋掉會員數字', /if \(mirroredMe\) return;/.test(store));
+  check('回訪客身分會清掉標記',
+        /function applyGuest\(\) \{\s*\n\s*mirroredMe = false/.test(store));
+  // 就算上面全破了，一個帳號也只能補算一次
+  check('補算前會檢查有沒有蓋過章', /claimedGuestAt/.test(store)
+        && /if \(u\.exists\(\) && u\.data\(\)\.claimedGuestAt\)/.test(store));
+  check('補算時會蓋章', /claimedGuestAt: F\.serverTimestamp\(\)/.test(store));
+}
+
 // 彩蛋只能靠人手動做出來。自動液壓機會一直壓，
 // 如果它也會觸發彩蛋，「一鏡到底」之類的條件就自己完成了。
 {

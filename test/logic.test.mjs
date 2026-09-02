@@ -534,5 +534,42 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   S.state.me.magicHand = null; S.state.me.uid = null; S.state.me.skills = [];
 }
 
+/* --------------------------- 訪客補算漏洞（v0.10.8） -- */
+// 真實災情：朋友發現「刷新可以免費加 3000 下」，小圈子總數被灌到十萬。
+// 開頁時 prefillFromMirror() 會把會員的累計填進 state.me（免得畫面閃 0），
+// 而那時候 mode 還是 'guest'。這個空檔裡點一下，squash() → saveGuest()
+// 就把會員的數字存成訪客進度，認證回來就被當成新玩家的成果補算。
+{
+  const KEY = 'popgru.guest';
+  const read = () => { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { return null; } };
+
+  // 正常的訪客：存得進去
+  localStorage.removeItem(KEY);
+  S.state.mode = 'guest';
+  S.state.me.lifetime = 0; S.state.me.fish = 0;
+  S.squash();
+  ok('★ 真的訪客進度會存下來', (read()?.lifetime || 0) > 0, JSON.stringify(read()));
+
+  // 模擬「畫面被會員備份墊過」的狀態
+  localStorage.removeItem(KEY);
+  localStorage.setItem('popgru.mirror', JSON.stringify({
+    uid:'someone', lifetime: 50000, fish: 9999, treasures: [], skills: [],
+  }));
+  S._prefillFromMirrorForTest?.();
+  const before = read();
+  S.state.me.lifetime = 50000;                 // 墊上去的會員數字
+  S.squash();
+  const after = read();
+  ok('★ 墊過會員數字之後就不再寫訪客存檔',
+     !after || (after.lifetime || 0) < 50000,
+     JSON.stringify(after));
+  ok('沒有把五萬寫進訪客存檔', !after || after.lifetime !== 50001,
+     JSON.stringify(after));
+
+  localStorage.removeItem(KEY);
+  localStorage.removeItem('popgru.mirror');
+  S.state.me.lifetime = 0; S.state.me.fish = 0;
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
