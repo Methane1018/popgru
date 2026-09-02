@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.10.10';
+} from './config.js?v=0.11.0';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -634,11 +634,19 @@ export function squash() {
   me.fish += r.gained;
 
   // 🔮 水晶球、🕛 準時 會讓金魚更容易掉
+  // 🥇 金魚：固定每 N 下一條，不是碰運氣。
   // 進度存在 me.goldTick 而不是模組變數，這樣重整之後不會從頭算起 ——
   // 否則畫面上的進度條每次開頁都會歸零，看起來像倒退。
   const goldOdds = goldfishOdds();
   me.goldTick = (me.goldTick || 0) + 1;
   if (me.goldTick >= goldOdds) { me.goldTick = 0; r.goldfish = true; me.goldfish += 1; }
+
+  // 😵 攤了：這才是隨機的那個。少見，但一次給得多。
+  if (Math.random() < 1 / flatOdds()) {
+    r.flat = true;
+    r.flatFish = TUNING.flatFish;
+    me.fish += r.flatFish;
+  }
 
   // 👋 魔法手：在自己家壓的時候，同一下也會落在朋友家。
   // 這才是它值 5 點的地方 —— 不是多壓幾下，是你照常玩就順手幫到人。
@@ -650,7 +658,7 @@ export function squash() {
     if (mh.left <= 0) me.magicHand = null;
   }
 
-  const drop = rollTreasure();                       // 寶物掉落
+  const drop = rollTreasure(r.flat ? TUNING.flatDropBoost : 1);   // 攤的那一下特別容易掉寶
   if (drop && unlockTreasure(drop.id)) r.treasure = drop;
 
   if (!v.isMine && v.uid) {                          // 記下幫過誰，成就要用
@@ -1010,6 +1018,10 @@ export function buffOf(kind) {
 
 export const helpedCount = () => Object.keys(state.me.helped || {}).length;
 
+// 攤一次平均要幾下。跟金魚一樣用除法，增益再多也不會退化成「每下都攤」。
+export const flatOdds = () =>
+  Math.max(1, Math.round(TUNING.flatOdds / (1 + Math.max(0, buffOf('flat')))));
+
 // 下一條金魚要幾下（🔮 水晶球、🌠 極光、🕛 準時、📜 追本溯源、🪨 重壓 都會讓它變少）
 //
 // ⚠️ 這裡本來是 `門檻 × (1 - 增益)`，而 gold 的增益全部收齊剛好是 1.00 ——
@@ -1218,8 +1230,8 @@ export function checkAchievements() {
 }
 
 // 掉落。稀有的先擲，才不會被常見的蓋過去。
-function rollTreasure() {
-  const mult = 1 + buffOf('drop');
+function rollTreasure(boost = 1) {
+  const mult = (1 + buffOf('drop')) * boost;
   const pool = TREASURES
     .filter(t => t.source === 'drop' && !hasTreasure(t.id))
     // 傳說與神話要先在探寶軸點出權限，沒點就根本不在池子裡。

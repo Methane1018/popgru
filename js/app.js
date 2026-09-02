@@ -1,14 +1,14 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.10.10';
+import * as S from './store.js?v=0.11.0';
 import {
   TUNING, ITEMS, MILESTONES, HATS, clampQty,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
   TREASURES, RARITY, SOURCE_LABEL, EGG_TAG, tagOf, treasureHow,
   SKILLS, AXES, SP_STEPS, skillPrereq,
-} from './config.js?v=0.10.10';
+} from './config.js?v=0.11.0';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -167,18 +167,22 @@ function press(ev, auto) {
 
   const r = S.squash();
   sfxDown();
-  if (navigator.vibrate) { try { navigator.vibrate(r.goldfish ? [12,40,24] : 12); } catch {} }
+  if (navigator.vibrate) { try { navigator.vibrate(r.flat ? [12,40,24] : 12); } catch {} }
 
-  if (r.goldfish) {                      // 攤在地上三秒，掉一條金魚
+  // 🥇 金魚是固定計數，不打斷你 —— 進度條本來就看得到，不需要演一場
+  if (r.goldfish) { sfxGold(); toast('🥇 掉了一條金魚'); }
+
+  // 😵 攤了才是那個「喔！」的瞬間：少見、攤三秒、給一大把魚
+  if (r.flat) {
     stuck = true;
     setPose(true, true);
     sfxSad();
-    toast('🥇 格魯攤了 · 掉了一條金魚');
+    toast(`😵 格魯攤了 · 🐟 ${nf(r.flatFish)}`);
     clearTimeout(stuckTimer);
     stuckTimer = setTimeout(() => {
       stuck = false;
       if (!pointerDown) { setPose(false); sfxUp(); } else { setPose(true); }
-      sfxGold();
+      sfxUp();
     }, 3000);
     return;
   }
@@ -1116,7 +1120,9 @@ function panelItems(body) {
   const me = S.state.me;
   body.append(el('p', 'note', `你有 🐟 ${nf(me.fish)}${me.goldfish ? ` · 🥇 ${me.goldfish} 金魚` : ''}`));
   body.append(el('p', 'hint-sm',
-    `🐟 魚壓一下得一條。🥇 金魚每 ${nf(TUNING.goldfishOdds)} 下才掉一次，只能用來買金牌送人。` +
+    `🐟 魚壓一下得一條。🥇 金魚每 ${nf(S.goldfishOdds())} 下固定掉一條（畫面上有進度條），` +
+    `可以買金牌、圖鑑裡的寶物，也可以換技能點。` +
+    `😵 格魯偶爾會攤在地上 —— 那是隨機的，一次給 ${nf(TUNING.flatFish)} 條魚，而且特別容易掉寶。` +
     `想換造型請按下面的「🎨 裝扮」。`));
 
   for (const [key, item] of Object.entries(ITEMS)) {

@@ -622,6 +622,7 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
 // 這一段的用意是：以後再加任何寶物或技能，只要讓某個算式退化就會在這裡紅。
 {
   const { TREASURES: ALL, SKILLS: ALLSK, ITEMS: IT } = await import('../js/config.js');
+  globalThis.ALLT = ALL; globalThis.ALLS = ALLSK;   // 後面拆分測試也要用
   const total = kind => [...ALL, ...ALLSK]
     .filter(x => x.buff && x.buff.kind === kind)
     .reduce((n, x) => n + x.buff.value, 0);
@@ -665,6 +666,61 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
      String((1 + S.buffOf('drop')) / 300));
 
   S.state.me.treasures = []; S.state.me.skills = [];
+}
+
+/* ------------------- 金魚與「攤了」拆開（v0.11.0） -- */
+// 潮邊的提議：這兩件事本來是同一個事件穿兩件衣服 ——
+// 金魚明明可預期卻裝成隨機，而最好笑的攤地動畫被鎖死在固定節奏上。
+// 拆開之後：金魚＝穩定收入（有進度條），攤了＝真正的隨機大獎。
+{
+  S.state.me.treasures = []; S.state.me.skills = [];
+  S.state.me.goldTick = 0; S.state.me.goldfish = 0; S.state.me.fish = 0;
+  S.state.viewing = { ...S.state.myGru, isMine:true };
+
+  // ── 金魚：固定計數，跟亂數無關 ──
+  TUNING.goldfishOdds = 5;
+  setRandom(1);                                  // 亂數壓在上限＝永遠不攤、不掉寶
+  for (let i = 0; i < 4; i++) S.squash();
+  ok('★ 還沒到門檻不會掉金魚', S.state.me.goldfish === 0, String(S.state.me.goldfish));
+  const r5 = S.squash();
+  ok('★ 到門檻一定掉，不看運氣', r5.goldfish === true && S.state.me.goldfish === 1);
+  ok('★ 掉金魚不會讓格魯攤掉', !r5.flat, JSON.stringify(r5));
+
+  // 連跑兩輪都準時
+  for (let i = 0; i < 5; i++) S.squash();
+  ok('★ 第二輪一樣準', S.state.me.goldfish === 2, String(S.state.me.goldfish));
+
+  // ── 攤了：純隨機，跟金魚計數無關 ──
+  S.state.me.goldTick = 0; S.state.me.goldfish = 0; S.state.me.fish = 0;
+  setRandom(0);                                  // 亂數壓在下限＝一定攤
+  const rf = S.squash();
+  ok('★ 攤了是隨機事件', rf.flat === true, JSON.stringify(rf));
+  ok('★ 攤一次給一大把魚', rf.flatFish === TUNING.flatFish, String(rf.flatFish));
+  ok('★ 魚真的進帳', S.state.me.fish >= TUNING.flatFish, String(S.state.me.fish));
+  ok('★ 攤了跟金魚各算各的', rf.goldfish !== true || S.state.me.goldTick === 0);
+
+  // 攤的那一下特別容易掉寶
+  S.state.me.treasures = [];
+  setRandom(0);
+  const withFlat = S.squash();
+  ok('★ 攤的那一下會掉寶', !!withFlat.treasure, JSON.stringify(withFlat.treasure));
+
+  // ── 兩者的機率算式都不會退化 ──
+  TUNING.goldfishOdds = 350;
+  S.state.me.treasures = ALLT.map(t => t.id);
+  S.state.me.skills = ALLS.map(x => x.id);
+  ok('★ 全收齊時攤的機率也不會變成每下都攤', S.flatOdds() > 1, String(S.flatOdds()));
+  ok('★ 沒有 flat 增益時就是設定值', (() => {
+      S.state.me.treasures = []; S.state.me.skills = [];
+      return S.flatOdds() === TUNING.flatOdds; })(), String(S.flatOdds()));
+
+  // 金魚比攤了常見 —— 穩定收入應該比大獎容易拿到
+  ok('★ 金魚比攤了常見', TUNING.goldfishOdds < TUNING.flatOdds,
+     `${TUNING.goldfishOdds} vs ${TUNING.flatOdds}`);
+
+  setRandom(1);
+  S.state.me.treasures = []; S.state.me.skills = [];
+  S.state.me.goldTick = 0; S.state.me.goldfish = 0; S.state.me.fish = 0;
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
