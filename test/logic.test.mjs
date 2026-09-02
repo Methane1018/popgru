@@ -145,7 +145,7 @@ S.state.me.treasures = [];
 S.state.me.helped = {};
 S.state.me.giftsReceived = 0;
 
-ok('寶物共 29 個', TREASURES.length === 29, String(TREASURES.length));
+ok('寶物共 30 個', TREASURES.length === 30, String(TREASURES.length));
 ok('每個寶物都有增益', TREASURES.every(t => t.buff && t.buff.kind));
 ok('每個寶物都有提示', TREASURES.every(t => t.hint && t.hint.length > 2));
 ok('沒有重複的 id', new Set(TREASURES.map(t => t.id)).size === TREASURES.length);
@@ -478,6 +478,60 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   ok('沒有技能時不會炸', S.repairSkills() === 0);
 
   S.state.me.skills = [];
+}
+
+/* ------------------------------------------ 魔法手與彩蛋（v0.10.6） -- */
+{
+  const { treasureInfo, SOURCE_LABEL, EGG_TAG } = await import('../js/config.js');
+
+  // 彩蛋不該洩漏稀有度
+  ok('★ 有彩蛋專用標記', EGG_TAG.name === '彩蛋' && !!EGG_TAG.color, JSON.stringify(EGG_TAG));
+  ok('★ 追本溯源存在', !!treasureInfo('origin'));
+  ok('★ 它是彩蛋', treasureInfo('origin').source === 'egg');
+  ok('★ 提示夠隱晦', treasureInfo('origin').hint === '在很久很久以前......',
+     treasureInfo('origin').hint);
+  ok('★ 拿到之後說得出怎麼拿的', /v0\.1\.0/.test(treasureInfo('origin').how),
+     treasureInfo('origin').how);
+  ok('★ 好奇心改名叫再看一眼', treasureInfo('curious').name === '再看一眼',
+     treasureInfo('curious').name);
+  ok('★ id 沒變（已解鎖的人不會掉）', !!treasureInfo('curious'));
+
+  // 每個彩蛋都要有 how，不然不知不覺解鎖的人不知道發生什麼事
+  const { TREASURES: TS } = await import('../js/config.js');
+  const eggs = TS.filter(t => t.source === 'egg');
+  ok('★ 每個彩蛋都寫得出怎麼拿的', eggs.every(t => t.how), eggs.filter(t => !t.how).map(t => t.id).join(','));
+  ok('★ 一鏡到底講明不能用液壓機', /自動液壓機不算/.test(treasureInfo('combo').how),
+     treasureInfo('combo').how);
+
+  // 魔法手：留下之後，在自己家壓會同時幫朋友壓
+  S.state.me.skills = ['social1','social2','social3','social4'];
+  S.state.me.treasures = []; S.state.me.magicDay = null;
+  S.state.viewing = { ...S.state.myGru, isMine:true };
+  ok('學會之後今天還有一次', S.magicHandLeft() === 1);
+
+  S.state.me.magicHand = { uid:'fr', name:'阿明', left:3 };
+  const r1 = S.squash();
+  ok('★ 在自己家壓會帶動魔法手', !!r1.magic && r1.magic.left === 2, JSON.stringify(r1.magic));
+  S.squash(); S.squash();
+  ok('★ 用完就收手', S.state.me.magicHand === null, JSON.stringify(S.state.me.magicHand));
+  const r4 = S.squash();
+  ok('★ 收手之後不再觸發', !r4.magic);
+
+  // 在別人家壓不會觸發（那已經是直接幫忙了）
+  S.state.me.magicHand = { uid:'fr', name:'阿明', left:5 };
+  S.state.viewing = { uid:'other', name:'別人', ownerName:'小華', squashes:0, isMine:false };
+  const r5 = S.squash();
+  ok('★ 在別人家壓不會動用魔法手', !r5.magic && S.state.me.magicHand.left === 5,
+     String(S.state.me.magicHand.left));
+  S.state.viewing = { ...S.state.myGru, isMine:true };
+
+  // 不能留給自己
+  S.state.me.magicHand = { uid: S.state.me.uid || 'me', name:'我', left:5 };
+  S.state.me.uid = 'me';
+  const r6 = S.squash();
+  ok('★ 不會對自己用魔法手', !r6.magic, JSON.stringify(r6.magic));
+
+  S.state.me.magicHand = null; S.state.me.uid = null; S.state.me.skills = [];
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

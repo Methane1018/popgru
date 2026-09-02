@@ -220,6 +220,25 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
         `少了 ${unioned.filter(f => !merged.includes(f))}`);
 }
 
+// 彩蛋只能靠人手動做出來。自動液壓機會一直壓，
+// 如果它也會觸發彩蛋，「一鏡到底」之類的條件就自己完成了。
+{
+  check('自動壓不會觸發彩蛋', /if \(!auto\) checkEggs\(/.test(app));
+  check('checkEggs 只有一個呼叫點',
+        (app.match(/checkEggs\(/g) || []).length === 2, '一個定義一個呼叫');
+  check('自動壓走的是 press(null, true)', /press\(null, true\)/.test(app));
+
+  // 每個彩蛋都要寫得出「拿到之後怎麼來的」，不然不知不覺解鎖的人會一頭霧水
+  const block = (cfg.match(/export const TREASURES = \[(.*?)\n\];/s) || ['',''])[1];
+  const eggs = block.split(/(?=\{ id:')/).filter(b => /source:'egg'/.test(b));
+  const noHow = eggs.filter(b => !/how:'/.test(b)).map(b => (b.match(/id:'(\w+)'/) || [])[1]);
+  check('每個彩蛋都有 how', !noHow.length, String(noHow));
+
+  // 彩蛋在圖鑑用自己的標記，不露稀有度
+  check('彩蛋有專用標記', /export const EGG_TAG/.test(cfg));
+  check('圖鑑對彩蛋不顯示稀有度', /isEgg \? EGG_TAG\.name : RARITY/.test(app));
+}
+
 // nav 的按鈕是「圖示 <i> ＋ 標籤 <em>」兩層。
 // 對它們直接寫 .textContent 會把兩個 span 一起洗掉，按鈕就只剩一個字，
 // 而且只有在「有未讀信」或「按了靜音」之後才看得到 —— 典型的靜默故障。

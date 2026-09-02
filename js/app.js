@@ -1,14 +1,14 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.10.5';
+import * as S from './store.js?v=0.10.6';
 import {
   TUNING, ITEMS, MILESTONES, HATS, clampQty,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
-  TREASURES, RARITY, SOURCE_LABEL, treasureHow,
+  TREASURES, RARITY, SOURCE_LABEL, EGG_TAG, treasureHow,
   SKILLS, AXES, SP_STEPS, skillPrereq,
-} from './config.js?v=0.10.5';
+} from './config.js?v=0.10.6';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -743,9 +743,15 @@ function dexDetailView(body, t) {
   head.append(el('div', 'dex-detail-icon' + (has ? '' : ' locked'), has ? t.icon : '❔'));
   head.append(el('div', 'dex-detail-name', has ? t.name : '???'));
   const tags = el('div', 'dex-detail-tags');
-  const rar = el('span', 'dex-rar', RARITY[t.rarity].name);
-  rar.style.background = RARITY[t.rarity].color;
-  tags.append(rar, el('span', 'dex-rar src', SOURCE_LABEL[t.source]));
+  if (t.source === 'egg') {
+    const eg = el('span', 'dex-rar', EGG_TAG.name);
+    eg.style.background = EGG_TAG.color;
+    tags.append(eg);                       // 彩蛋只有這一個標記，不露稀有度
+  } else {
+    const rar = el('span', 'dex-rar', RARITY[t.rarity].name);
+    rar.style.background = RARITY[t.rarity].color;
+    tags.append(rar, el('span', 'dex-rar src', SOURCE_LABEL[t.source]));
+  }
   head.append(tags);
   body.append(head);
 
@@ -824,8 +830,10 @@ function panelCodex(body) {
     cell.append(el('div', 'dex-icon', has ? t.icon : gate ? '🔒' : '❔'));
     cell.append(el('div', 'dex-name', has ? t.name : '???'));
 
-    const rar = el('span', 'dex-rar', RARITY[t.rarity].name);
-    rar.style.background = RARITY[t.rarity].color;
+    // 彩蛋不標稀有度：那會洩漏它有多難，而彩蛋的重點就是自己撞到
+    const isEgg = t.source === 'egg';
+    const rar = el('span', 'dex-rar', isEgg ? EGG_TAG.name : RARITY[t.rarity].name);
+    rar.style.background = isEgg ? EGG_TAG.color : RARITY[t.rarity].color;
     cell.append(rar);
 
     // 彩蛋維持隱晦，其他的直接把條件寫出來 ——
@@ -1027,7 +1035,20 @@ function panelChangelog(body) {
     if (rel.v === APP_VERSION) head.append(el('span', 'rel-tag', '目前版本'));
     box.append(head);
     const ul = el('ul');
-    rel.notes.forEach(n => ul.append(el('li', null, n)));
+    rel.notes.forEach(n => {
+      // 📜 追本溯源：最舊那一版的「初始版本」四個字是可以點的
+      const i = rel.v === '0.1.0' ? n.indexOf('初始版本') : -1;
+      if (i < 0) { ul.append(el('li', null, n)); return; }
+      const li = el('li');
+      li.append(n.slice(0, i));
+      const link = el('button', 'egg-link', '初始版本');
+      link.onclick = () => {
+        if (S.unlockTreasure('origin')) toast('📜 追本溯源');
+        else toast('一切都是從這裡開始的');
+      };
+      li.append(link, n.slice(i + 4));
+      ul.append(li);
+    });
     box.append(ul);
     body.append(box);
   }
@@ -1036,6 +1057,13 @@ function panelChangelog(body) {
 /* --- 大家 --- */
 function panelPeople(body) {
   const st = S.state;
+  // 手還在誰身上、還剩幾下 —— 不寫出來的話這個技能等於沒有回饋
+  const hand = st.me.magicHand;
+  if (hand && hand.left > 0) {
+    const h = el('p', 'note');
+    h.textContent = `👋 你的手還留在 ${hand.name} 身上 · 還會幫他壓 ${nf(hand.left)} 下`;
+    body.append(h);
+  }
   const list = st.roster.filter(g => g.uid !== st.me.uid);
   if (!list.length) { body.append(el('p', 'empty', '還沒有其他人。把連結分享給朋友，他們登入後就會出現在這裡。')); return; }
 
@@ -1070,13 +1098,14 @@ function panelPeople(body) {
     // 學會之後名單長出一顆新按鈕，那個「多了東西」本身就是回報。
     if (S.grants('magichand')) {
       const mh = el('button', 'btn small', '👋');
-      mh.title = `魔法手：直接幫壓 ${TUNING.magicHandHits} 下，不算你的額度（一天一次）`;
+      mh.title = `魔法手：留一隻手在他身上，接下來你在自己家壓的 ` +
+                 `${TUNING.magicHandClicks} 下會同時幫他壓（一天一次，不算你的額度）`;
       mh.disabled = !S.magicHandLeft();
       mh.onclick = async () => {
         mh.disabled = true;
         try {
-          const n = await S.magicHand(g.uid);
-          toast(`留了一隻手在 ${who(g.ownerName)} 家，幫壓了 ${n} 下`);
+          const n = await S.magicHand(g.uid, who(g.ownerName));
+          toast(`留了一隻手在 ${who(g.ownerName)} 身上 · 接下來 ${n} 下會一起幫他壓`);
           refreshPanel('people');
         } catch (e) { toast(e.message); mh.disabled = !S.magicHandLeft(); }
       };
@@ -1157,7 +1186,8 @@ function drawInbox(body) {
     const verb = { poke:'戳了你一下', note:'留了一句話', fish:'送你魚',
                    freeze:'送你凍結卡', hat:'扣了頂帽子在你頭上',
                    double:'送你雙倍魚', medal:'頒了金牌給你',
-                   magichand:`留了一隻魔法手，幫你壓了 ${m.hits || TUNING.magicHandHits} 下`,
+                   magichand:`在你身上留了一隻魔法手 · 接下來會陸續幫你壓 ` +
+                             `${m.hits || TUNING.magicHandClicks} 下`,
                  }[m.type] || '送了東西';
     const qtyTag = m.qty > 1 ? ` ×${m.qty}` : '';
     const nm = senderName(m.from, m.fromName);

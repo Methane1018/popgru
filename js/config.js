@@ -26,6 +26,13 @@ export const firebaseConfig = {
 //  （順序是刻意的：不寫更新內容就升不了版。）
 // ----------------------------------------------------------------------------
 export const CHANGELOG = [
+  { v:'0.10.6', date:'2026-09-02', notes:[
+    '👋 魔法手大改：不再是一次幫壓幾十下，而是在朋友身上留下一隻手 —— 接下來你在自己家壓的 200 下會同時幫他壓一下。你照常玩，順手就幫到人',
+    '新彩蛋一枚。提示：在很久很久以前......',
+    '彩蛋在圖鑑改用粉色標記，不再顯示稀有度（稀有度會洩漏它有多難）',
+    '「好奇心」改名叫「再看一眼」',
+    '「一鏡到底」講明了要手動壓，自動液壓機不算',
+  ]},
   { v:'0.10.5', date:'2026-09-02', notes:[
     '終於找到技能消失的真正原因：連續學兩個技能時，後面那筆會把前面那筆的存檔蓋掉',
     '被弄丟的技能會在下次開啟時自動補回來（學得起第二層就代表第一層一定付過錢）',
@@ -34,7 +41,7 @@ export const CHANGELOG = [
   { v:'0.10.4', date:'2026-09-02', notes:[
     '再修一次「學過的技能又變回可以學」—— 這次是從根本改：每次存檔都把完整的技能與寶物清單送上去，就算中間有一次寫入失敗也會自己補回來',
     '🥇 金魚進度條：現在看得到距離下一條還有幾下',
-    '金魚變好拿了（每 350 下，本來是 500），🗿 石像也從 40 降到 30',
+    '金魚變好拿了（每 350 下，本來是 500），圖鑑裡最貴的那個也降價了',
     '後期加速：可以用 10 條金魚換 1 點技能點',
     '「📖 線索」除了顯示掉落機率之外，也真的加 15% 掉落機率了',
     '圖鑑的商店寶物本來寫「道具商店」，其實是在圖鑑裡點進去換，文案修正',
@@ -214,7 +221,8 @@ export const TUNING = {
 
   // ── 技能樹 ──
   autopressMs:  1400,      // 自動液壓機每幾毫秒壓一下（只在分頁看得見時）
-  magicHandHits:  60,      // 魔法手一次幫朋友壓幾下
+  magicHandClicks: 200,    // 魔法手留下之後，你在自己家壓的前幾下會同時幫朋友壓
+                           //   重點不是數量，是「你照常玩，順手就幫到人」
 };
 
 // 共同里程碑：全圈總壓扁數達標時，所有人一起解鎖
@@ -307,7 +315,7 @@ export const TREASURES = [
   // ── 彩蛋 4 ──
   // 彩蛋的 hint 是「還沒拿到時」看到的，要隱晦；
   // how 是「拿到之後」才揭曉的真正做法 —— 不然不知不覺解鎖的人不知道發生了什麼。
-  { id:'curious', icon:'🔢', name:'好奇心',   rarity:'common',   source:'egg',
+  { id:'curious', icon:'🔢', name:'再看一眼', rarity:'common',   source:'egg',
     hint:'有些數字禁不起反覆敲打',
     how:'快速連點左上角的版本號 5 下',           buff:{ kind:'drop', value:0.10 } },
   { id:'oclock',  icon:'🕛', name:'準時',     rarity:'uncommon', source:'egg',
@@ -318,7 +326,12 @@ export const TREASURES = [
     how:'連續戳格魯的腳 10 下',                  buff:{ kind:'fish', value:0.03 } },
   { id:'combo',   icon:'🔁', name:'一鏡到底', rarity:'epic',     source:'egg',
     hint:'別停下來',
-    how:'一口氣壓 100 下，中間不能停超過 2 秒',   buff:{ kind:'double', value:30 } },
+    how:'一口氣手動壓 100 下，中間不能停超過 2 秒（自動液壓機不算）',
+    buff:{ kind:'double', value:30 } },
+  { id:'origin',  icon:'📜', name:'追本溯源', rarity:'rare',     source:'egg',
+    hint:'在很久很久以前......',
+    how:'在更新內容裡翻到最舊的 v0.1.0，點那四個藍色的字',
+    buff:{ kind:'gold', value:0.15 } },
 
   // ── 商店（用金魚買）3 ──
   { id:'trophy',  icon:'🏆', name:'獎盃',     rarity:'uncommon', source:'shop', gold:5,
@@ -330,6 +343,8 @@ export const TREASURES = [
 ];
 
 export const SOURCE_LABEL = { drop:'掉落', achieve:'成就', egg:'彩蛋', shop:'商店' };
+// 彩蛋不標稀有度 —— 稀有度會洩漏它有多難，而彩蛋的重點就是自己撞到
+export const EGG_TAG = { name:'彩蛋', color:'#d4568f' };
 export const treasureInfo = id => TREASURES.find(t => t.id === id);
 // 拿到之後看到的說明。彩蛋才需要另寫，其他的條件本身就是提示。
 export const treasureHow = t => t.how || t.hint;
@@ -494,7 +509,8 @@ export const SKILLS = [
   { id:'social3', axis:'social', tier:3, cost:3, icon:'🚪', name:'常客',
     desc:'每天幫別人的額度再 +200',        buff:{ kind:'help', value:200 } },
   { id:'social4', axis:'social', tier:4, cost:5, icon:'👋', name:'魔法手',
-    desc:'每天可以在一位朋友家留下一隻手，直接幫壓 60 下，而且不算你的額度。',
+    desc:'每天可以在一位朋友身上留下一隻手。接下來你在自己家壓的 200 下，' +
+         '會同時幫他壓一下 —— 你照常玩，順手就幫到人，而且完全不吃你的幫忙額度。',
     grants:'magichand' },
 
   { id:'hunt1',   axis:'hunt',   tier:1, cost:1, icon:'👀', name:'眼尖',

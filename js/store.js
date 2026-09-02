@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.10.5';
+} from './config.js?v=0.10.6';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -63,7 +63,7 @@ const blankMe = () => ({
   ownedHats:[], ownedSkins:[], loaded:false,
   treasures:[], skills:[], helped:{}, giftsReceived:0,
   streak:0, bestStreak:0, lastDay:null, todayCount:0, helpToday:0, helpDay:null,
-  magicDay:null, goldTick:0, spBought:0,
+  magicDay:null, goldTick:0, spBought:0, magicHand:null,
 });
 const blankGru = () => ({
   uid:null, name:DEFAULT_GRU_NAME, ownerName:null, ownerPhoto:null,
@@ -185,7 +185,7 @@ function outboxSettle(uid, target, n, fish, gold) {
 // 這樣就算伺服器那邊完全沒寫進去，重整也不會掉。
 // 前段是「絕對值」欄位（只有這台裝置在寫，遺失就回不來）；
 // 後段是顯示用的數字，載入時先拿來墊著，免得畫面閃一下 0 再跳回真值。
-const MIRROR_FIELDS = ['streak','bestStreak','lastDay','todayCount','helpToday','helpDay','freezes','double','magicDay','goldTick'];
+const MIRROR_FIELDS = ['streak','bestStreak','lastDay','todayCount','helpToday','helpDay','freezes','double','magicDay','goldTick','magicHand'];
 const MIRROR_DISPLAY = ['lifetime','fish','goldfish','medals','treasures','skills'];
 const MIRROR_ALL = [...MIRROR_FIELDS, ...MIRROR_DISPLAY];
 
@@ -414,6 +414,7 @@ async function onSignedIn(user) {
         helpToday:d.helpToday||0, helpDay:d.helpDay||null,
         freezes:d.freezes||0, double:d.double||0,
         magicDay:d.magicDay||null, goldTick:d.goldTick||0,
+        magicHand:d.magicHand||null,
       };
       // 本機鏡像只要「不比伺服器舊」就以本機為準。
       // 'YYYY-MM-DD' 直接字串比大小就等於比日期。
@@ -557,6 +558,7 @@ export async function goHome() {
 
 /* --------------------------------------------------------------- squash -- */
 let flushTarget = null;
+let pendMagic = { uid:null, n:0 };   // 👋 魔法手要幫朋友壓的量
 // 裝扮增益是百分比，但魚是整數。零頭先累積著，湊滿一條才發，
 // 這樣不會出現 0.5 條魚，長期下來比例也是對的。
 let fishFrac = 0;
@@ -613,6 +615,16 @@ export function squash() {
   const goldOdds = goldfishOdds();
   me.goldTick = (me.goldTick || 0) + 1;
   if (me.goldTick >= goldOdds) { me.goldTick = 0; r.goldfish = true; me.goldfish += 1; }
+
+  // 👋 魔法手：在自己家壓的時候，同一下也會落在朋友家。
+  // 這才是它值 5 點的地方 —— 不是多壓幾下，是你照常玩就順手幫到人。
+  const mh = me.magicHand;
+  if (v.isMine && mh && mh.left > 0 && mh.uid && mh.uid !== me.uid) {
+    mh.left -= 1;
+    pendMagic = { uid: mh.uid, n: (pendMagic.uid === mh.uid ? pendMagic.n : 0) + 1 };
+    r.magic = { name: mh.name, left: mh.left };
+    if (mh.left <= 0) me.magicHand = null;
+  }
 
   const drop = rollTreasure();                       // 寶物掉落
   if (drop && unlockTreasure(drop.id)) r.treasure = drop;
@@ -696,13 +708,14 @@ export async function flush() {
   if (flushing) { scheduleFlush(); return; }
   clearTimeout(flushTimer);
   const n = state.pending, fish = pendFish, gold = pendGold, target = flushTarget;
-  const inc = pendInc, uni = pendUnion, set = pendSet;
-  if (!n && !fish && !gold && !hasPend()) return;
+  const inc = pendInc, uni = pendUnion, set = pendSet, magic = pendMagic;
+  if (!n && !fish && !gold && !magic.n && !hasPend()) return;
 
   flushing = true;
   inflight = { n, fish, gold };                 // 送出期間先記著，快照才不會把畫面往回拉
   state.pending = 0; pendFish = 0; pendGold = 0; flushTarget = null;
   pendInc = {}; pendUnion = {}; pendSet = {}; pendReconcile = false;
+  pendMagic = { uid:null, n:0 };
   const { F, db } = fb, me = state.me;
   try {
     const b = F.writeBatch(db);
@@ -712,7 +725,7 @@ export async function flush() {
       streak: me.streak, bestStreak: me.bestStreak, lastDay: me.lastDay,
       todayCount: me.todayCount, helpToday: me.helpToday, helpDay: me.helpDay,
       freezes: me.freezes, double: me.double, magicDay: me.magicDay,
-      goldTick: me.goldTick,
+      goldTick: me.goldTick, magicHand: me.magicHand,
       ...set,
     };
     for (const [f, v] of Object.entries(inc))  if (v) p[f] = F.increment(v);
@@ -740,6 +753,9 @@ export async function flush() {
     if (gold) p.goldfish = F.increment(gold);
     b.set(userRef(me.uid), p, { merge:true });
 
+    // 小圈子總數先算好再寫一次 ——
+    // 同一個批次不能對同一份文件寫兩次，而魔法手也要加進總數。
+    let globalAdd = 0;
     if (n && target) {
       b.set(gruRef(target), { squashes: F.increment(n), lastSquashedAt: F.serverTimestamp() }, { merge:true });
       if (target !== me.uid) {                       // 幫別人壓 → 在他家留下足跡
@@ -748,8 +764,22 @@ export async function flush() {
         }, { merge:true });
         p['helped.' + target] = F.increment(n);      // 自己這邊也記一筆，成就要用
       }
+      globalAdd += n;
+    }
+    // 👋 魔法手留下的那隻手：你在自己家壓的那些，同一批也落在朋友家
+    if (magic.n && magic.uid && magic.uid !== target) {
+      b.set(gruRef(magic.uid),
+        { squashes: F.increment(magic.n), lastSquashedAt: F.serverTimestamp() }, { merge:true });
+      b.set(visitRef(magic.uid, me.uid), {
+        name: me.name, photo: me.photo, count: F.increment(magic.n),
+        at: F.serverTimestamp(), magic: true,
+      }, { merge:true });
+      p['helped.' + magic.uid] = F.increment(magic.n);
+      globalAdd += magic.n;
+    }
+    if (globalAdd) {
       b.set(globalRef(), {
-        squashes: F.increment(n),
+        squashes: F.increment(globalAdd),
         lastSquasher: { uid: me.uid, name: me.name, at: Date.now() },
       }, { merge:true });
     }
@@ -778,6 +808,8 @@ export async function flush() {
     for (const [f, v] of Object.entries(inc)) queueInc(f, v);
     for (const [f, s] of Object.entries(uni)) s.forEach(v => queueUnion(f, v));
     for (const [f, v] of Object.entries(set)) if (!(f in pendSet)) pendSet[f] = v;
+    if (magic.n) pendMagic = { uid: magic.uid,
+                               n: (pendMagic.uid === magic.uid ? pendMagic.n : 0) + magic.n };
   } finally {
     flushing = false;
     inflight = { n:0, fish:0, gold:0 };
@@ -991,39 +1023,28 @@ export const canLearn = id => !skillBlock(id);
 export const magicHandLeft = () =>
   !grants('magichand') ? 0 : (state.me.magicDay === dayStr() ? 0 : 1);
 
-export async function magicHand(toUid) {
+// 在一位朋友身上留下一隻手。之後你在自己家壓的每一下都會同時幫他壓一下，
+// 直到額度用完為止（見 squash()）。一天只能留一次。
+export async function magicHand(toUid, toName) {
   if (state.mode !== 'member' || !fb) throw new Error('要登入才能用魔法手');
   if (!grants('magichand'))   throw new Error('還沒學會魔法手');
   if (toUid === state.me.uid) throw new Error('魔法手是留給朋友的');
-  if (!magicHandLeft())       throw new Error('今天的魔法手已經用掉了，明天再來');
+  if (!magicHandLeft())       throw new Error('今天的魔法手已經留出去了，明天再來');
 
-  const n = TUNING.magicHandHits, me = state.me;
-  await flush();                       // 先把手上的清乾淨，免得跟這批混在一起
-  const { F } = fb;
-  const b = F.writeBatch(fb.db);
-  b.set(gruRef(toUid), { squashes:F.increment(n), lastSquashedAt:F.serverTimestamp() }, { merge:true });
-  b.set(visitRef(toUid, me.uid), {
-    name:me.name, photo:me.photo, count:F.increment(n), at:F.serverTimestamp(), magic:true,
-  }, { merge:true });
-  b.set(globalRef(), {
-    squashes:F.increment(n), lastSquasher:{ uid:me.uid, name:me.name, at:Date.now() },
-  }, { merge:true });
-  b.set(userRef(me.uid), {
-    lifetime:F.increment(n), fish:F.increment(n),
-    magicDay:dayStr(), ['helped.' + toUid]:F.increment(n),
-  }, { merge:true });
-  b.set(F.doc(inboxCol(toUid)), {
-    from:me.uid, fromName:me.name, type:'magichand', hits:n,
-    at:F.serverTimestamp(), read:false,
-  });
-  await b.commit();
-
-  // 寫成功才動本機，畫面才不會先跳一個還沒發生的數字
+  const n = TUNING.magicHandClicks, me = state.me;
+  me.magicHand = { uid: toUid, name: toName || '朋友', left: n };
   me.magicDay = dayStr();
-  me.lifetime += n; me.fish += n;
-  me.helped = { ...(me.helped || {}), [toUid]: (me.helped?.[toUid] || 0) + n };
-  checkAchievements();
   sync();
+  scheduleFlush();                     // magicHand / magicDay 走一般的存檔路徑
+
+  // 通知對方。這封信不給東西，只是讓他知道有人留了一隻手在他家。
+  try {
+    const { F } = fb;
+    await F.setDoc(F.doc(inboxCol(toUid)), {
+      from:me.uid, fromName:me.name, type:'magichand', hits:n,
+      at:F.serverTimestamp(), read:false,
+    });
+  } catch (e) { console.warn('魔法手通知失敗：', e); }
   return n;
 }
 
