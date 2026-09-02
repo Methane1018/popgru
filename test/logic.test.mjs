@@ -765,5 +765,60 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   S.state.global = { squashes: 0, lastSquasher: null };
 }
 
+/* --------------------- 送的東西收不到（v0.11.3） -- */
+// 真實災情：朋友說「有信，但似乎沒有真正得到」。
+// collectInbox() 只寫伺服器、沒動 state.me，而 flush() 每 6 秒會把
+// freezes / double 這兩個絕對值欄位用本機的舊值寫回去 —— 六秒內蓋掉。
+{
+  const { ITEMS: IT2 } = await import('../js/config.js');
+  S.state.me.treasures = []; S.state.me.skills = [];
+  S.state.me.fish = 0; S.state.me.medals = 0;
+  S.state.me.freezes = 0; S.state.me.double = 0; S.state.me.giftsReceived = 0;
+
+  // 送一張凍結卡
+  S.applyInbox([{ id:'a', type:'freeze', from:'x', read:false }]);
+  ok('★ 凍結卡有進到本機', S.state.me.freezes === 1, String(S.state.me.freezes));
+
+  // 這就是關鍵：flush() 寫出去的是 me.freezes 這個絕對值。
+  // 本機沒更新的話，寫出去的就是舊值，等於把剛收到的蓋掉。
+  ok('★ 所以存檔寫出去的值也含這張卡', S.state.me.freezes === 1);
+
+  // 一次送三張
+  S.applyInbox([{ id:'b', type:'freeze', qty:3, from:'x', read:false }]);
+  ok('★ 一封信送三張就是加三張', S.state.me.freezes === 4, String(S.state.me.freezes));
+
+  // 雙倍魚
+  S.applyInbox([{ id:'c', type:'double', from:'x', read:false }]);
+  ok('★ 雙倍魚有進到本機', S.state.me.double === TUNING.doubleClicks,
+     String(S.state.me.double));
+
+  // 魚與金牌
+  S.applyInbox([{ id:'d', type:'fish', qty:2, from:'x', read:false },
+                { id:'e', type:'medal', from:'x', read:false }]);
+  ok('★ 送魚 ×2 就是兩份', S.state.me.fish === (IT2.fish.gives || 20) * 2,
+     String(S.state.me.fish));
+  ok('★ 金牌有進到本機', S.state.me.medals === 1, String(S.state.me.medals));
+
+  // 帽子要解鎖而且戴上
+  S.state.me.ownedHats = [];
+  S.applyInbox([{ id:'f', type:'hat', hat:'🎩', from:'x', read:false }]);
+  ok('★ 送的帽子會永久解鎖', S.state.me.ownedHats.includes('🎩'),
+     S.state.me.ownedHats.join(','));
+  ok('★ 而且直接戴上', S.state.myGru.hat === '🎩', String(S.state.myGru.hat));
+
+  // 🎁 人緣：以前 giftsReceived 從來沒被加過，這個成就根本拿不到
+  ok('★ 收禮數量有在算', S.state.me.giftsReceived === 6,
+     String(S.state.me.giftsReceived));
+  S.state.me.giftsReceived = 9; S.state.me.treasures = [];
+  S.applyInbox([{ id:'g', type:'fish', from:'x', read:false }]);
+  ok('★ 收滿十樣拿得到 🎁 人緣',
+     S.checkAchievements().some(t => t.id === 'loved'),
+     String(S.state.me.giftsReceived));
+
+  S.state.me.fish = 0; S.state.me.medals = 0; S.state.me.freezes = 0;
+  S.state.me.double = 0; S.state.me.giftsReceived = 0;
+  S.state.me.ownedHats = []; S.state.myGru.hat = null; S.state.me.treasures = [];
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

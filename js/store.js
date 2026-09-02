@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.11.2';
+} from './config.js?v=0.11.3';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -395,7 +395,7 @@ async function onSignedIn(user) {
       lifetime: (d.lifetime||0) + state.pending + inflight.n    + pendIncOf('lifetime'),
       fish:     (d.fish    ||0) + pendFish      + inflight.fish  + pendIncOf('fish'),
       goldfish: (d.goldfish||0) + pendGold      + inflight.gold  + pendIncOf('goldfish'),
-      medals:   d.medals||0,
+      medals:   (d.medals||0) + pendIncOf('medals'),
       // 舊制買過的帽子（只存在 grus.hat）視同已解鎖，不能讓人白花錢
       ownedHats: mergeOwned(mergeOwned(state.me.ownedHats, d.ownedHats),
                             state.myGru.hat ? [state.myGru.hat] : []),
@@ -410,7 +410,7 @@ async function onSignedIn(user) {
       // 換來的點數只有本人會加，取大的那邊就不會被慢一拍的快照拉回去
       spBought:  Math.max(state.me.spBought || 0, d.spBought || 0),
       helped: (d.helped && typeof d.helped === 'object') ? d.helped : {},
-      giftsReceived: d.giftsReceived || 0,
+      giftsReceived: (d.giftsReceived||0) + pendIncOf('giftsReceived'),
       nick: realName(d.nick),
       googleName: realName(d.googleName) || state.me.googleName,
       name: realName(d.nick) || realName(d.googleName) || state.me.googleName || NO_NAME,
@@ -1344,14 +1344,24 @@ export async function buyForSelf(key, qty = 1) {
   } else { saveGuest(); }
 }
 
-export async function collectInbox() {
-  if (state.mode !== 'member' || !fb) return [];
-  const unread = state.inbox.filter(m => !m.read);
-  if (!unread.length) return [];
-
+// 把一批信件的內容套進本機狀態，回傳各項總數。
+//
+// 這一段刻意跟網路分開：之前它埋在 collectInbox() 裡面，
+// 而 collectInbox() 需要連線才跑得動，所以測試碰不到它 ——
+// 「收到的凍結卡六秒後消失」就這樣躲過了所有測試。
+export function applyInbox(msgs) {
+  // ⚠️ 收下來的東西一定要先進本機狀態。
+  //
+  // 之前這整段埋在 collectInbox() 裡，而且「只寫伺服器、完全沒動 state.me」。
+  // 但 flush() 每 6 秒就會把 freezes / double 這兩個絕對值欄位
+  // 用本機的舊值寫回伺服器 —— 於是收到的凍結卡和雙倍魚六秒內被自己蓋掉。
+  // 信還在，東西沒了。
+  //
+  // 跟 v0.9 連勝歸零是同一個病：**絕對值欄位的本機值就是唯一真相**，
+  // 任何人改了它都必須改在本機，不能只改伺服器。
   const me = state.me;
   let fish = 0, freezes = 0, dbl = 0, medals = 0, hat = null;
-  for (const m of unread) {
+  for (const m of msgs) {
     // 一封信可能是一次送好幾個。沒有 qty 的舊信件就是 1。
     const q = clampQty(m.qty || 1);
     if (m.type === 'fish')   fish    += (ITEMS.fish.gives || 20) * q;
@@ -1360,21 +1370,48 @@ export async function collectInbox() {
     if (m.type === 'medal')  medals  += q;
     if (m.type === 'hat')    hat      = m.hat || '🎩';
   }
+  me.fish    += fish;
+  me.medals  += medals;
+  me.freezes += freezes;        // 絕對欄位：flush() 每次都會拿本機的值寫出去
+  me.double  += dbl;            // 同上
+  me.giftsReceived = (me.giftsReceived || 0) + msgs.length;      // 🎁 人緣要用這個
+  if (hat) {
+    me.ownedHats = mergeOwned(me.ownedHats, [hat]);
+    state.myGru.hat = hat;
+    if (state.viewing.isMine) state.viewing.hat = hat;
+  }
+  return { fish, freezes, dbl, medals, hat };
+}
+
+export async function collectInbox() {
+  if (state.mode !== 'member' || !fb) return [];
+  const unread = state.inbox.filter(m => !m.read);
+  if (!unread.length) return [];
+
+  const me = state.me;
+  const { fish, freezes, dbl, medals, hat } = applyInbox(unread);   // 先進本機
+
+  // 用 increment 寫的欄位走同一個佇列，快照的「伺服器值 ＋ 待送量」才算得對。
+  // freezes / double 不在這裡 —— 它們是絕對欄位，flush() 每次都會把
+  // 本機的值寫出去，applyInbox() 已經改好了。
+  if (fish)   queueInc('fish', fish);
+  if (medals) queueInc('medals', medals);
+  queueInc('giftsReceived', unread.length);
+  if (hat) queueUnion('ownedHats', hat);
+  scheduleFlush();
+
+  // 先在本機標成已讀，這樣就算下面的寫入慢了也不會重複領
+  unread.forEach(m => { m.read = true; });
+  sync();
+  checkAchievements();          // 收滿十樣就拿到 🎁 人緣
+
+  // 信件是子集合，跟個人資料不是同一條路，要另外寫
   try {
     const { F } = fb;
     const b = F.writeBatch(fb.db);
-    const p = { lastSeen:F.serverTimestamp() };
-    if (fish)    p.fish    = F.increment(fish);
-    if (medals)  p.medals  = F.increment(medals);
-    if (freezes) p.freezes = (me.freezes||0) + freezes;
-    if (dbl)     p.double  = (me.double ||0) + dbl;
-    if (hat)     p.ownedHats = F.arrayUnion(hat);   // 送的帽子一併解鎖，之後能重複戴
-    b.set(userRef(me.uid), p, { merge:true });
     if (hat) b.set(gruRef(me.uid), { hat }, { merge:true });
     for (const m of unread) b.update(F.doc(inboxCol(me.uid), m.id), { read:true });
     await b.commit();
-    unread.forEach(m => { m.read = true; });
-    sync();
-  } catch (e) { console.warn('收取信箱失敗：', e); }
+  } catch (e) { console.error('POPGRU 標記信件已讀失敗（東西已經給了）：', e); }
   return unread;
 }

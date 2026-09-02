@@ -174,6 +174,21 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   }
 }
 
+// 收信箱拿到的東西一定要先進 state.me。
+// flush() 每次都把 freezes / double 這兩個絕對欄位用本機的值寫出去，
+// 只改伺服器不改本機的話，六秒內就被自己蓋回去 —— 信在，東西沒了。
+{
+  check('收信箱的內容有抽成純函式', /export function applyInbox/.test(store));
+  const body = (store.match(/export function applyInbox\(msgs\) \{[\s\S]*?\n\}/) || [''])[0];
+  for (const f of ['fish', 'medals', 'freezes', 'double']) {
+    check(`收信箱會改本機的 ${f}`, new RegExp(`me\\.${f}\\s*\\+=`).test(body));
+  }
+  check('收信箱會累計收禮數（🎁 人緣要用）',
+        /me\.giftsReceived = \(me\.giftsReceived \|\| 0\) \+ msgs\.length/.test(body));
+  check('收信箱不再自己寫 freezes 到伺服器',
+        !/p\.freezes = \(me\.freezes/.test(store));
+}
+
 // 畫面上的「小圈子總數」必須含本機還沒送出的點擊，
 // 否則你連壓 20 秒數字都不動，然後突然跳一大格 —— 里程碑進度條也跟著卡住。
 // 而且解鎖判定要跟畫面用同一個數字，不然會出現「進度條說到了但東西還鎖著」。
