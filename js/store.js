@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.11.1';
+} from './config.js?v=0.11.2';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -928,7 +928,7 @@ export async function setNick(n) {
 }
 
 export const ownsHat  = e => !!e && state.me.ownedHats.includes(e);
-export const hatLocked = e => hatInfo(e).need > state.global.squashes;
+export const hatLocked = e => hatInfo(e).need > globalNow();
 
 // 解鎖一頂帽子。付一次錢，之後換戴免費。
 // 帽子的解鎖走 buySkin('hat', …)，這裡只留給舊呼叫點用
@@ -942,7 +942,7 @@ export const ownsSkin = (kind, id) =>
   || state.me.ownedSkins.includes(skinKey(kind, id))
   // 帽子在舊版是獨立的 ownedHats，併進外觀系統之後要繼續認得，不能讓人重買
   || (kind === 'hat' && state.me.ownedHats.includes(id));
-export const skinLocked = (kind, id) => (skinInfo(kind, id)?.need || 0) > state.global.squashes;
+export const skinLocked = (kind, id) => (skinInfo(kind, id)?.need || 0) > globalNow();
 
 export async function buySkin(kind, id) {
   const info = skinInfo(kind, id);
@@ -1016,6 +1016,13 @@ export function buffOf(kind) {
 }
 
 export const helpedCount = () => Object.keys(state.me.helped || {}).length;
+
+// 小圈子總數：伺服器的數字 ＋ 這台裝置還沒送出去的點擊。
+// 直接讀 state.global.squashes 的話，那是「上一次寫入時的快照」——
+// 你連壓 20 秒畫面完全不動，然後突然跳一大格。里程碑進度條也跟著卡住。
+// 個人累計老早就是這樣算的（v0.9），小圈子總數卻一直漏掉。
+export const globalNow = () =>
+  state.global.squashes + state.pending + inflight.n;
 
 // 攤一次平均要幾下。跟金魚一樣用除法，增益再多也不會退化成「每下都攤」。
 export const flatOdds = () =>
@@ -1210,7 +1217,7 @@ const ACHIEVE = {
   nb3:     () => helpedCount() >= 3,
   nb5:     () => helpedCount() >= 5,
   loved:   () => (state.me.giftsReceived || 0) >= 10,
-  mt100k:  () => state.global.squashes >= 100000,
+  mt100k:  () => globalNow() >= 100000,
   stylish: () => cosmeticCount() >= 10,
   hatlove: () => SKINS.hat.filter(h => h.cost > 0).every(h => ownsSkin('hat', h.id)),
   master:  () => Object.keys(AXES).some(a => axisDone(a)),

@@ -174,6 +174,23 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   }
 }
 
+// 畫面上的「小圈子總數」必須含本機還沒送出的點擊，
+// 否則你連壓 20 秒數字都不動，然後突然跳一大格 —— 里程碑進度條也跟著卡住。
+// 而且解鎖判定要跟畫面用同一個數字，不然會出現「進度條說到了但東西還鎖著」。
+{
+  check('有 globalNow 把待送量加進去',
+        /export const globalNow[\s\S]{0,160}state\.pending \+ inflight\.n/.test(store));
+  check('畫面用 globalNow', /S\.globalNow\(\)/.test(app));
+  check('解鎖判定也用 globalNow',
+        /hatInfo\(e\)\.need > globalNow\(\)/.test(store)
+        && /need \|\| 0\) > globalNow\(\)/.test(store));
+  // 進度條和它旁邊的字要在講同一件事
+  check('里程碑進度條用對下一個門檻的絕對比例',
+        /shown \/ next\.at \* 100/.test(app));
+  check('沒有殘留的分段算法', !/shown - prev\) \/ \(next\.at - prev\)/.test(app));
+  check('進度條文字寫出分子分母', /\$\{nf\(shown\)\} \/ \$\{nf\(next\.at\)\}/.test(app));
+}
+
 // 金魚從「隨機掉落」改成「固定計數」之後，畫面上不能再說它是機率。
 // 說明文字跟實際機制對不起來，比沒有說明還糟。
 {

@@ -17,6 +17,7 @@ Math.random = () => RND;
 
 const S = await import('../js/store.js');
 const { TUNING } = await import('../js/config.js');
+const cfgSync = await import('../js/config.js');
 
 let pass = 0, fail = 0;
 const ok = (name, cond, extra='') => {
@@ -721,6 +722,47 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   setRandom(1);
   S.state.me.treasures = []; S.state.me.skills = [];
   S.state.me.goldTick = 0; S.state.me.goldfish = 0; S.state.me.fish = 0;
+}
+
+/* ------------------- 小圈子總數要跟得上（v0.11.2） -- */
+// 潮邊回報「進度條有點沒跟上」，和運猜中了分母：
+//   (317208 - 上一個門檻) / (500000 - 上一個門檻)
+// 兩個問題：分母算的是「這一段」但旁邊的字寫「距離五十萬」；
+// 而且 state.global.squashes 完全不含本機還沒送出的點擊，
+// 所以連壓 20 秒畫面完全不動，然後突然跳一大格。
+{
+  S.state.mode = 'member'; S.state.me.uid = 'me'; S.state.me.loaded = true;
+  S.state.me.treasures = []; S.state.me.skills = [];
+  S.state.viewing = { ...S.state.myGru, isMine:true };
+  S.state.global = { squashes: 1000, lastSquasher: null };
+  S.state.pending = 0;
+  setRandom(1);
+
+  ok('★ 沒有待送量時就是伺服器的數字', S.globalNow() === 1000, String(S.globalNow()));
+  S.squash(); S.squash(); S.squash();
+  ok('★ 壓了就立刻反映，不用等寫入', S.globalNow() === 1003, String(S.globalNow()));
+  ok('★ 伺服器的數字本身沒被動到', S.state.global.squashes === 1000,
+     String(S.state.global.squashes));
+
+  // 解鎖判定要跟畫面用同一個數字，不然會出現「進度條說到了但東西還鎖著」
+  S.state.global = { squashes: 999, lastSquasher: null };
+  S.state.pending = 0;
+  const need1000 = require_hat_at_1000();
+  function require_hat_at_1000() {
+    const { SKINS } = cfgSync;
+    return (SKINS.hat.find(h => h.need === 1000) || {}).id || null;
+  }
+  if (need1000) {
+    ok('★ 差一下的時候還鎖著', S.skinLocked('hat', need1000));
+    S.squash();
+    ok('★ 壓下那一下就立刻解鎖（不用等寫入）', !S.skinLocked('hat', need1000));
+  } else {
+    ok('（沒有門檻剛好 1000 的帽子，跳過）', true);
+    ok('（同上）', true);
+  }
+
+  S.state.mode = 'guest'; S.state.pending = 0;
+  S.state.global = { squashes: 0, lastSquasher: null };
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

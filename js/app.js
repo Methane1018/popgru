@@ -1,14 +1,14 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.11.1';
+import * as S from './store.js?v=0.11.2';
 import {
   TUNING, ITEMS, MILESTONES, HATS, clampQty,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
   TREASURES, RARITY, SOURCE_LABEL, EGG_TAG, tagOf, treasureHow,
   SKILLS, AXES, SP_STEPS, skillPrereq,
-} from './config.js?v=0.11.1';
+} from './config.js?v=0.11.2';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -266,7 +266,7 @@ function render() {
   }
 
   // --- 小圈子總數 + 里程碑 ---
-  const shown = S.configured && !st.offline ? st.global.squashes : me.lifetime;
+  const shown = S.configured && !st.offline ? S.globalNow() : me.lifetime;
   $('countLabel').textContent = S.configured && !st.offline ? '小圈子總共壓了' : '你總共壓了';
   const c = $('count');
   c.textContent = nf(shown);
@@ -276,10 +276,15 @@ function render() {
   }
   const next = MILESTONES.find(m => m.at > shown);
   if (next) {
-    const prev = [...MILESTONES].reverse().find(m => m.at <= shown)?.at || 0;
-    const pct = Math.max(0, Math.min(100, (shown - prev) / (next.at - prev) * 100));
-    $('barFill').style.width = pct + '%';
-    $('barText').textContent = `距離「${next.label}」還有 ${nf(next.at - shown)} 下 · 解鎖 ${next.unlock}`;
+    // 本來是「這一段走了多少」：(shown - 上一個門檻) / (下一個門檻 - 上一個門檻)。
+    // 但旁邊的字寫的是「距離五十萬」，所以大家自然把它讀成 shown / 500000 ——
+    // 31 萬看到一條只有兩成七的進度條，當然覺得壞了。
+    // 進度條和它旁邊的字必須在講同一件事，所以改成對「下一個門檻」的絕對比例，
+    // 而且把分子分母直接寫出來，不留任何想像空間。
+    const pct = Math.max(0, Math.min(100, shown / next.at * 100));
+    $('barFill').style.width = pct.toFixed(2) + '%';
+    $('barText').textContent =
+      `${nf(shown)} / ${nf(next.at)}　還有 ${nf(next.at - shown)} 下 · 解鎖 ${next.unlock}`;
     $('bar').hidden = false;
   } else { $('bar').hidden = true; }
 
