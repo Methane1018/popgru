@@ -571,5 +571,49 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   S.state.me.lifetime = 0; S.state.me.fish = 0;
 }
 
+/* ------------------- 買東西之後畫面把錢退回去（v0.10.9） -- */
+// 真實災情：用金魚買寶物，金魚扣掉了，但點一下就變回原來的數目。
+// 快照是「伺服器的數字 ＋ 還沒送出的量」，而扣款排在 pendInc 裡，
+// 那條算式沒把它加進去 —— 於是每次快照回音都把剛花掉的錢退回來。
+{
+  S.state.mode = 'member'; S.state.me.uid = 'me';
+  S.state.me.treasures = []; S.state.me.skills = [];
+  S.state.me.goldfish = 20; S.state.me.fish = 500;
+
+  ok('一開始沒有欠帳', S.pendingDelta('goldfish') === 0, String(S.pendingDelta('goldfish')));
+
+  await S.buyTreasure('trophy');                 // 🏆 獎盃 5 金魚
+  ok('★ 本機立刻扣掉', S.state.me.goldfish === 15, String(S.state.me.goldfish));
+  ok('★ 而且記著「伺服器還不知道扣了 5」',
+     S.pendingDelta('goldfish') === -5, String(S.pendingDelta('goldfish')));
+
+  // 這就是修好的關鍵：快照拿伺服器的舊數字 20，加上 -5 才是 15，不是 20
+  const srvGold = 20;
+  ok('★ 快照重算之後還是 15（不會退錢）',
+     srvGold + S.pendingDelta('goldfish') === 15,
+     String(srvGold + S.pendingDelta('goldfish')));
+
+  await S.buyTreasure('gem');                    // 💎 原石 12 金魚 → 一共 17
+  ok('★ 連買兩個會累加欠帳', S.pendingDelta('goldfish') === -17,
+     String(S.pendingDelta('goldfish')));
+  ok('★ 本機餘額正確', S.state.me.goldfish === 3, String(S.state.me.goldfish));
+
+  // 買裝扮扣魚也要記著
+  const before = S.pendingDelta('fish');
+  await S.buySkin('bg', 'sunset').catch(() => {});
+  ok('★ 買裝扮的扣款也記在帳上', S.pendingDelta('fish') < before,
+     `${before} → ${S.pendingDelta('fish')}`);
+
+  // 買道具給自己也是
+  const b2 = S.pendingDelta('fish');
+  S.state.me.fish = 500;
+  await S.buyForSelf('freeze', 1);
+  ok('★ 買道具的扣款也記在帳上', S.pendingDelta('fish') < b2,
+     `${b2} → ${S.pendingDelta('fish')}`);
+
+  S.state.mode = 'guest'; S.state.me.uid = null;
+  S.state.me.treasures = []; S.state.me.goldfish = 0; S.state.me.fish = 0;
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

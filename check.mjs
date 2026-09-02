@@ -174,6 +174,24 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   }
 }
 
+// 花掉的錢在寫出去之前，快照必須把它算進來。
+// 快照給的是伺服器的舊數字；不加上還沒送出的扣款，畫面就會「退錢」——
+// 用金魚買寶物之後點一下，金魚又變回原來的數目（真的發生過）。
+{
+  check('有 pendIncOf 記還沒送出的扣款', /const pendIncOf = f =>/.test(store));
+  check('送出中的扣款也記著', /inflightInc = inc;/.test(store));
+  check('送出結束會清掉', /inflightInc = \{\};/.test(store));
+  const snapLines = store.split('\n').filter(l => l.includes('pendIncOf('));
+  for (const f of ['lifetime', 'fish', 'goldfish']) {
+    check(`快照的 ${f} 有加回未送出的扣款`,
+          snapLines.some(l => l.trim().startsWith(f + ':') && l.includes(`pendIncOf('${f}')`)),
+          snapLines.length + ' 行有 pendIncOf');
+  }
+  // 花錢一律走佇列。自己另外 setDoc 的話扣款就不在 pendInc 裡，畫面照樣退錢。
+  const writes = [...store.matchAll(/F\.setDoc\(userRef\(/g)].length;
+  check('只有登入那一次直接寫 users', writes === 1, `有 ${writes} 處`);
+}
+
 // FieldValue（increment / arrayUnion）只能在 flush() 裡面組出來。
 //
 // 之前是在各處先做好 FieldValue 再丟進 pendPatch，而 pendPatch 是用物件展開合併的：

@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.10.8';
+} from './config.js?v=0.10.9';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -392,16 +392,15 @@ async function onSignedIn(user) {
     // 任何一次非 flush 的寫入（買帽子、買外觀、改暱稱、收信箱）都會
     // 推來一份「還沒算進你剛才那些點擊」的快照，畫面就往回跳。
     Object.assign(state.me, {
-      lifetime: (d.lifetime||0) + state.pending + inflight.n,
-      fish:     (d.fish    ||0) + pendFish      + inflight.fish,
-      goldfish: (d.goldfish||0) + pendGold      + inflight.gold,
+      lifetime: (d.lifetime||0) + state.pending + inflight.n    + pendIncOf('lifetime'),
+      fish:     (d.fish    ||0) + pendFish      + inflight.fish  + pendIncOf('fish'),
+      goldfish: (d.goldfish||0) + pendGold      + inflight.gold  + pendIncOf('goldfish'),
       medals:   d.medals||0,
       // 舊制買過的帽子（只存在 grus.hat）視同已解鎖，不能讓人白花錢
-      ownedHats: Array.from(new Set([
-        ...(Array.isArray(d.ownedHats) ? d.ownedHats : []),
-        ...(state.myGru.hat ? [state.myGru.hat] : []),
-      ])),
-      ownedSkins: Array.isArray(d.ownedSkins) ? d.ownedSkins : [],
+      ownedHats: mergeOwned(mergeOwned(state.me.ownedHats, d.ownedHats),
+                            state.myGru.hat ? [state.myGru.hat] : []),
+      // 跟寶物、技能一樣是只增不減，照抄會把剛買的裝扮抹掉
+      ownedSkins: mergeOwned(state.me.ownedSkins, d.ownedSkins),
       // 這兩個是「只增不減」而且用 arrayUnion 寫出去的，所以要取聯集不能照抄。
       // 照抄的話，從 learnSkill() 到 flush() 真的寫進去之間（最長 20 秒），
       // 任何一次快照回音都會把剛學的技能／剛掉的寶物抹掉 ——
@@ -690,6 +689,14 @@ let pendFish = 0, pendGold = 0, flushing = false, flushTimer = null;
 // 少了這個，送出期間來的快照會用「還沒加上這批」的伺服器數字覆蓋畫面，
 // 看起來就像數字自己往回跳。
 let inflight = { n:0, fish:0, gold:0 };
+let inflightInc = {};        // 已經送出、但還沒收到回音的那批 queueInc
+
+// 本機已經扣掉、伺服器還不知道的量。
+// 快照拿回來的是伺服器的舊數字，不加上這個就會把剛買的東西「退錢」——
+// 症狀就是用金魚買寶物之後，點一下畫面又變回原來的金魚數。
+const pendIncOf = f => (pendInc[f] || 0) + (inflightInc[f] || 0);
+// 對外只是為了看得見（測試與主控台除錯用）
+export const pendingDelta = f => pendIncOf(f);
 let failCount = 0, blockedLogged = false;
 
 // 停手之後很快就寫出去。原本只靠 8 秒的定時批次，壓兩下馬上關掉就來不及。
@@ -738,6 +745,7 @@ export async function flush() {
 
   flushing = true;
   inflight = { n, fish, gold };                 // 送出期間先記著，快照才不會把畫面往回拉
+  inflightInc = inc;                            // 扣款也一樣，不然畫面會先退錢再扣一次
   state.pending = 0; pendFish = 0; pendGold = 0; flushTarget = null;
   pendInc = {}; pendUnion = {}; pendSet = {}; pendReconcile = false;
   pendMagic = { uid:null, n:0 };
@@ -838,6 +846,7 @@ export async function flush() {
   } finally {
     flushing = false;
     inflight = { n:0, fish:0, gold:0 };
+    inflightInc = {};
     if (state.pending || pendFish || pendGold) scheduleFlush();   // 期間又累積了就再送
   }
 }
@@ -939,12 +948,13 @@ export async function buySkin(kind, id) {
   state.me.ownedSkins = [...state.me.ownedSkins, skinKey(kind, id)];
   if (kind === 'hat') state.me.ownedHats = [...state.me.ownedHats, id];
   sync();
-  if (state.mode === 'member' && fb) {
-    const { F } = fb;
-    const p = { fish: F.increment(-info.cost), ownedSkins: F.arrayUnion(skinKey(kind, id)) };
-    if (kind === 'hat') p.ownedHats = F.arrayUnion(id);   // 舊欄位一起維護，別的裝置才讀得到
-    F.setDoc(userRef(state.me.uid), p, { merge:true })
-      .catch(e => console.warn('解鎖外觀失敗：', e));
+  if (state.mode === 'member') {          // 排隊不需要連線
+    // 走一般的存檔佇列。自己另外寫一份的話，扣款就不在 pendInc 裡，
+    // 快照回音會把畫面上的魚「退」回去。
+    queueInc('fish', -info.cost);
+    queueUnion('ownedSkins', skinKey(kind, id));
+    if (kind === 'hat') queueUnion('ownedHats', id);      // 舊欄位一起維護，別的裝置才讀得到
+    scheduleFlush();
   } else { saveGuest(); }
   await setSkin(kind, id);
 }
@@ -1086,7 +1096,7 @@ export function buySkillPoint(qty = 1) {
     throw new Error(`金魚不夠，需要 ${cost} 條`);
   state.me.goldfish -= cost;
   state.me.spBought = spBought() + n;
-  if (state.mode === 'member' && fb) {
+  if (state.mode === 'member') {          // 排隊不需要連線
     queueInc('goldfish', -cost);
     queueSet('spBought', state.me.spBought);
     scheduleFlush();
@@ -1111,7 +1121,7 @@ export function repairSkills() {
   if (!added) return 0;
   state.me.skills = [...have];
   console.warn(`POPGRU 補回 ${added} 個被寫入問題弄丟的技能`);
-  if (state.mode === 'member' && fb) { pendReconcile = true; scheduleFlush(); }
+  if (state.mode === 'member') { pendReconcile = true; scheduleFlush(); }
   else { saveGuest(); }
   return added;
 }
@@ -1120,7 +1130,7 @@ export function learnSkill(id) {
   const why = skillBlock(id);
   if (why) throw new Error(why);
   state.me.skills = [...(state.me.skills || []), id];
-  if (state.mode === 'member' && fb) {
+  if (state.mode === 'member') {          // 排隊不需要連線
     // 不用排一筆 arrayUnion：flush 每次都會把完整清單送上去，
     // 這裡只要讓它知道「有東西要對帳」就好
     pendReconcile = true;
@@ -1149,7 +1159,7 @@ export const bestHelped  = () => Math.max(0, ...Object.values(state.me.helped ||
 export function unlockTreasure(id, quiet) {
   if (!treasureInfo(id) || hasTreasure(id)) return false;
   state.me.treasures = [...state.me.treasures, id];
-  if (state.mode === 'member' && fb) {
+  if (state.mode === 'member') {          // 排隊不需要連線
     pendReconcile = true;
     scheduleFlush();
   } else { saveGuest(); }
@@ -1164,7 +1174,7 @@ export async function buyTreasure(id) {
   if (hasTreasure(id))           throw new Error('已經有了');
   if (state.me.goldfish < t.gold) throw new Error(`金魚不夠，需要 ${t.gold} 條`);
   state.me.goldfish -= t.gold;
-  if (state.mode === 'member' && fb) {
+  if (state.mode === 'member') {          // 排隊不需要連線，flush() 自己會等
     queueInc('goldfish', -t.gold);
     scheduleFlush();
   }
@@ -1300,15 +1310,11 @@ export async function buyForSelf(key, qty = 1) {
   if (key === 'double') me.double  += (TUNING.doubleClicks + buffOf('double')) * n;   // 🌌 星塵
   sync();
 
-  if (state.mode === 'member' && fb) {
-    const { F } = fb;
-    const p = { fish:F.increment(-cost) };        // 要跟本機扣的一致，不能用原價
-    if (key === 'freeze') p.freezes = me.freezes;
-    if (key === 'double') p.double  = me.double;
-    // 不 await：Firestore 離線時會把寫入排隊而不是失敗，
-    // await 下去整個函式就卡住，呼叫端的重畫也永遠不會執行。
-    F.setDoc(userRef(me.uid), p, { merge:true })
-      .catch(e => console.warn('購買寫入失敗：', e));
+  if (state.mode === 'member') {          // 排隊不需要連線
+    // 要跟本機扣的一致，不能用原價。
+    // freezes / double 是絕對欄位，flush 每次都會寫，不用再排一次。
+    queueInc('fish', -cost);
+    scheduleFlush();
   } else { saveGuest(); }
 }
 
