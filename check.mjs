@@ -174,6 +174,25 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   }
 }
 
+// ⚠️ set(..., {merge:true}) 不會把點號當成欄位路徑（只有 update() 會）。
+// 寫 p['helped.' + uid] 會在伺服器上長出一個名字裡有點的頂層欄位，
+// 而 helped 那個 map 永遠是空的 —— 「幫過三個人」的成就因此永遠達不成。
+// 要寫巢狀就寫巢狀物件，sentinel 在任何深度都有效。
+{
+  // 註解裡有把錯誤寫法當反例，掃描前要先拿掉，不然自己抓自己
+  const code = store.replace(/^\s*\/\/.*$/gm, '');
+  const dotted = [...code.matchAll(/(\w+)\[[`'"][\w.]+\.[`'"]\s*\+/g)].map(m => m[0]);
+  check('沒有用點號當欄位路徑', !dotted.length, String(dotted));
+  check('helped 用巢狀物件寫', /p\.helped = \{ \.\.\.\(p\.helped \|\| \{\}\), \[/.test(store));
+
+  // 計數表也是只增不減，照抄伺服器會抹掉本機還沒寫出去的
+  check('helped 用 mergeCounts 合併',
+        /helped: mergeCounts\(state\.me\.helped, readHelped\(d\)\)/.test(store));
+  check('有 mergeCounts', /export const mergeCounts/.test(store));
+  check('讀得回舊格式的 helped', /export const readHelped/.test(store)
+        && /k\.startsWith\('helped\.'\)/.test(store));
+}
+
 // 收信箱拿到的東西一定要先進 state.me。
 // flush() 每次都把 freezes / double 這兩個絕對欄位用本機的值寫出去，
 // 只改伺服器不改本機的話，六秒內就被自己蓋回去 —— 信在，東西沒了。

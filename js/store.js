@@ -10,7 +10,7 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.11.3';
+} from './config.js?v=0.11.4';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -234,6 +234,29 @@ function prefillFromMirror() {
 // 所以修在這裡而不是修 magicDay。
 // 合併「只增不減」的持有清單（寶物、技能）。
 // 本機可能有還沒寫出去的新項目，伺服器可能有別的裝置加的 —— 兩邊都要留。
+// 「幫過誰幾下」這種只增不減的計數表：每個 key 取大的那一邊。
+// 照抄伺服器的話，本機剛記下、還沒寫出去的那幾下就被抹掉了。
+export const mergeCounts = (local, server) => {
+  const out = { ...(server && typeof server === 'object' ? server : {}) };
+  for (const [k, v] of Object.entries(local || {})) {
+    out[k] = Math.max(Number(out[k]) || 0, Number(v) || 0);
+  }
+  return out;
+};
+
+// 舊資料救援：v0.11.4 之前寫成了名字帶點的頂層欄位（"helped.<uid>"），
+// 那些數字是真的，只是放錯地方。讀回來併進 helped，大家的進度才不會白費。
+export const readHelped = d => {
+  const out = { ...(d.helped && typeof d.helped === 'object' ? d.helped : {}) };
+  for (const [k, v] of Object.entries(d || {})) {
+    if (k.startsWith('helped.')) {
+      const uid = k.slice(7);
+      out[uid] = Math.max(Number(out[uid]) || 0, Number(v) || 0);
+    }
+  }
+  return out;
+};
+
 export const mergeOwned = (local, server) => Array.from(new Set([
   ...(Array.isArray(local)  ? local  : []),
   ...(Array.isArray(server) ? server : []),
@@ -409,7 +432,7 @@ async function onSignedIn(user) {
       skills:    mergeOwned(state.me.skills,    d.skills),
       // 換來的點數只有本人會加，取大的那邊就不會被慢一拍的快照拉回去
       spBought:  Math.max(state.me.spBought || 0, d.spBought || 0),
-      helped: (d.helped && typeof d.helped === 'object') ? d.helped : {},
+      helped: mergeCounts(state.me.helped, readHelped(d)),
       giftsReceived: (d.giftsReceived||0) + pendIncOf('giftsReceived'),
       nick: realName(d.nick),
       googleName: realName(d.googleName) || state.me.googleName,
@@ -802,7 +825,11 @@ export async function flush() {
         b.set(visitRef(target, me.uid), {
           name: me.name, photo: me.photo, count: F.increment(n), at: F.serverTimestamp(),
         }, { merge:true });
-        p['helped.' + target] = F.increment(n);      // 自己這邊也記一筆，成就要用
+        // ⚠️ 不能寫成 p['helped.' + target] ——
+        // set(..., {merge:true}) 不會把點號當成路徑（只有 update() 會），
+        // 那樣會在伺服器上長出一個名字裡有點的頂層欄位，helped 這個 map 永遠是空的。
+        // 巢狀物件寫進去才是對的，sentinel 在任何深度都有效。
+        p.helped = { ...(p.helped || {}), [target]: F.increment(n) };
       }
       globalAdd += n;
     }
@@ -814,7 +841,7 @@ export async function flush() {
         name: me.name, photo: me.photo, count: F.increment(magic.n),
         at: F.serverTimestamp(), magic: true,
       }, { merge:true });
-      p['helped.' + magic.uid] = F.increment(magic.n);
+      p.helped = { ...(p.helped || {}), [magic.uid]: F.increment(magic.n) };
       globalAdd += magic.n;
     }
     if (globalAdd) {

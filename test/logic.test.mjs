@@ -820,5 +820,66 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   S.state.me.ownedHats = []; S.state.myGru.hat = null; S.state.me.treasures = [];
 }
 
+/* ------------------ 「幫過三個人」永遠達不成（v0.11.4） -- */
+// 真實災情：好鄰居（幫過 3 個不同的人）拿不到。兩個原因疊在一起：
+//   1. flush() 寫的是 p['helped.' + uid]，但 set(..., {merge:true})
+//      不會把點號當路徑（只有 update() 會）—— 伺服器上長出一個
+//      名字裡有點的頂層欄位，helped 這個 map 永遠是空的
+//   2. 快照又用 d.helped（空的）把本機正確記下的內容蓋掉
+{
+  // 每個 key 取大的那一邊，本機還沒寫出去的不會被抹掉
+  ok('★ 本機領先時保住本機的',
+     S.mergeCounts({ a:5 }, { a:3 }).a === 5, JSON.stringify(S.mergeCounts({a:5},{a:3})));
+  ok('★ 伺服器領先時採用伺服器的',
+     S.mergeCounts({ a:2 }, { a:9 }).a === 9);
+  ok('★ 只有本機有的不會消失',
+     S.mergeCounts({ a:1, b:1 }, { a:1 }).b === 1,
+     JSON.stringify(S.mergeCounts({a:1,b:1},{a:1})));
+  ok('★ 只有伺服器有的會收進來（別的裝置幫的）',
+     S.mergeCounts({ a:1 }, { a:1, c:1 }).c === 1);
+  ok('空的不會炸', Object.keys(S.mergeCounts(null, null)).length === 0);
+
+  // 舊資料救援：名字帶點的頂層欄位要讀得回來
+  const legacy = { helped: {}, 'helped.u1': 12, 'helped.u2': 3, fish: 99 };
+  const rescued = S.readHelped(legacy);
+  ok('★ 救得回舊格式的紀錄',
+     rescued.u1 === 12 && rescued.u2 === 3, JSON.stringify(rescued));
+  ok('★ 不會把別的欄位當成幫忙紀錄', rescued.fish === undefined, JSON.stringify(rescued));
+  ok('★ 新舊格式並存時取大的',
+     S.readHelped({ helped:{ u1:5 }, 'helped.u1':20 }).u1 === 20,
+     JSON.stringify(S.readHelped({ helped:{u1:5}, 'helped.u1':20 })));
+
+  // 端對端：幫三個人就該解得開好鄰居
+  S.state.me.treasures = []; S.state.me.skills = []; S.state.me.helped = {};
+  S.state.mode = 'member'; S.state.me.uid = 'me';
+  setRandom(1);
+  TUNING.helpCap = 0;                       // 額度不擋，專心測計數
+  for (const uid of ['a', 'b', 'c']) {
+    S.state.viewing = { uid, name:'x', ownerName:'x', squashes:0, isMine:false, skin:{} };
+    S.squash();
+  }
+  ok('★ 幫過三個不同的人', S.helpedCount() === 3, String(S.helpedCount()));
+  // squash() 自己就會檢查成就，所以幫完第三個人的當下就解鎖了 ——
+  // 要看的是結果，不是「再呼叫一次會不會回傳它」
+  ok('★ 好鄰居解得開', S.hasTreasure('nb3'),
+     JSON.stringify(S.state.me.helped) + ' / ' + S.state.me.treasures.join(','));
+
+  // 快照回音（伺服器還是空的）不能把進度抹掉
+  S.state.me.helped = S.mergeCounts(S.state.me.helped, {});
+  ok('★ 快照回音之後仍然是三個人', S.helpedCount() === 3,
+     JSON.stringify(S.state.me.helped));
+
+  // 幫同一個人很多次還是只算一個
+  S.state.viewing = { uid:'a', name:'x', ownerName:'x', squashes:0, isMine:false, skin:{} };
+  for (let i = 0; i < 10; i++) S.squash();
+  ok('★ 重複幫同一個人不會灌水', S.helpedCount() === 3, String(S.helpedCount()));
+  ok('★ 但次數有累積', S.bestHelped() >= 10, String(S.bestHelped()));
+
+  TUNING.helpCap = 300;
+  S.state.mode = 'guest'; S.state.me.uid = null;
+  S.state.me.helped = {}; S.state.me.treasures = [];
+  S.state.viewing = { ...S.state.myGru, isMine:true };
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
