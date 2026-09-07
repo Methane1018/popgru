@@ -9,7 +9,7 @@
 
 export const STORY = {
   id: 'rabbithole',
-  title: '（還沒取名）',
+  title: '（還沒取名）',   // 賽博：電子警察追查非法道具。世界觀見 docs/LORE.md
 
   // 從哪一個場景開始
   start: 'placeholder',
@@ -18,8 +18,8 @@ export const STORY = {
     placeholder: {
       lines: [
         { who: null,  text: '（旁白：who 給 null 就沒有立繪）' },
-        { who: 'gru', face: 'normal',    text: '（一句話盡量不超過 60 個中文字。）' },
-        { who: 'gru', face: 'surprised', text: '（表情換成 surprised 就會換立繪。）' },
+        { who: 'cop', face: 'normal',    text: '（一句話盡量不超過 60 個中文字。）' },
+        { who: 'cop', face: 'surprised', text: '（表情換成 surprised 就會換立繪。）' },
       ],
       // 直接接下一幕
       next: 'placeholder2',
@@ -27,7 +27,7 @@ export const STORY = {
 
     placeholder2: {
       lines: [
-        { who: 'gru', face: 'normal', text: '（這裡示範選擇。選擇改語氣，不改路線。）' },
+        { who: 'cop', face: 'normal', text: '（這裡示範選擇。選擇改語氣，不改路線。）' },
       ],
       choices: [
         { text: '（選項一）', to: 'placeholder3' },
