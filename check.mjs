@@ -21,7 +21,7 @@ const check = (name, ok, detail = '') => {
 //    少一邊就會出現「幫忙額度自己跳回 300」「連續天數歸零」。
 {
   const w = plan.match(/const user = \{\s*lastSeen: NOW,(.*?)\.\.\.set,/s);
-  const r = store.match(/const srv = \{(.*?)\};/s);
+  const r = plan.match(/export const srvAbsolutes = \(d = \{\}\) => \(\{(.*?)\}\);/s);
   if (!w || !r) check('flush 與快照的絕對欄位區塊都存在', false, '找不到其中一段');
   else {
     const W = new Set([...w[1].matchAll(/(\w+):/g)].map(m => m[1]));
@@ -39,8 +39,8 @@ const check = (name, ok, detail = '') => {
   check('寫入失敗會通知畫面', /emit\('writefail'/.test(store));
   check('載入完會主動放行一次 flush', /state\.me\.loaded = true[\s\S]{0,1400}?\n      flush\(\);/.test(store));
   // 鏡像涵蓋的欄位必須跟 flush 寫回的完全一樣，否則會有欄位無人保護
-  const mf = store.match(/const MIRROR_FIELDS = \[(.*?)\];/s);
-  if (!mf) check('MIRROR_FIELDS 存在', false);
+  const mf = plan.match(/export const ABSOLUTE_FIELDS = \[(.*?)\];/s);
+  if (!mf) check('ABSOLUTE_FIELDS 存在', false);
   else {
     const M = new Set([...mf[1].matchAll(/'(\w+)'/g)].map(m => m[1]));
     const W = new Set([...(plan.match(/const user = \{\s*lastSeen: NOW,(.*?)\.\.\.set,/s) || ['',''])[1]
@@ -55,7 +55,8 @@ const check = (name, ok, detail = '') => {
   check('flush 會記錄 inflight', /inflight = \{ n, fish, gold \};/.test(store));
   check('flush 結束會清掉 inflight', /inflight = \{ n:0, fish:0, gold:0 \};[\s\S]{0,120}scheduleFlush/.test(store));
   check('快照會加回未寫出的量',
-        /lifetime: \(d\.lifetime\|\|0\) \+ state\.pending \+ inflight\.n/.test(store));
+        /lifetime: \(d\.lifetime\|\|0\) \+ \(pend\.n\|\|0\)/.test(plan)
+        && /n:\s*state\.pending \+ inflight\.n/.test(store));
   check('載入時會先用本機備份墊畫面', /if \(prefillFromMirror\(\)\)/.test(store));
   // Firestore 第一份快照可能來自空的本機快取。把它當真就會把資料讀成 0
   // 再寫回伺服器，真資料就沒了 —— 這是連勝歸零的真正原因。
@@ -211,10 +212,10 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
 
   // 計數表也是只增不減，照抄伺服器會抹掉本機還沒寫出去的
   check('helped 用 mergeCounts 合併',
-        /helped: mergeCounts\(state\.me\.helped, readHelped\(d\)\)/.test(store));
-  check('有 mergeCounts', /export const mergeCounts/.test(store));
-  check('讀得回舊格式的 helped', /export const readHelped/.test(store)
-        && /k\.startsWith\('helped\.'\)/.test(store));
+        /helped:\s*mergeCounts\(prev\.helped, readHelped\(d\)\)/.test(plan));
+  check('有 mergeCounts', /export const mergeCounts/.test(plan));
+  check('讀得回舊格式的 helped', /export const readHelped/.test(plan)
+        && /k\.startsWith\('helped\.'\)/.test(plan));
 }
 
 // 收信箱拿到的東西一定要先進 state.me。
@@ -281,12 +282,14 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   check('有 pendIncOf 記還沒送出的扣款', /const pendIncOf = f =>/.test(store));
   check('送出中的扣款也記著', /inflightInc = inc;/.test(store));
   check('送出結束會清掉', /inflightInc = \{\};/.test(store));
-  const snapLines = store.split('\n').filter(l => l.includes('pendIncOf('));
-  for (const f of ['lifetime', 'fish', 'goldfish']) {
+  const snapLines = plan.split('\n').filter(l => l.includes('inc('));
+  for (const f of ['lifetime', 'fish', 'goldfish', 'medals', 'giftsReceived']) {
     check(`快照的 ${f} 有加回未送出的扣款`,
-          snapLines.some(l => l.trim().startsWith(f + ':') && l.includes(`pendIncOf('${f}')`)),
-          snapLines.length + ' 行有 pendIncOf');
+          snapLines.some(l => l.trim().startsWith(f + ':') && l.includes(`inc('${f}')`)),
+          snapLines.length + ' 行有 inc(');
   }
+  check('排隊中與送出中的扣款都算進去', /const pendIncAll = \(\)/.test(store)
+        && /inc:\s*pendIncAll\(\)/.test(store));
   // 花錢一律走佇列。自己另外 setDoc 的話扣款就不在 pendInc 裡，畫面照樣退錢。
   const writes = [...store.matchAll(/F\.setDoc\(userRef\(/g)].length;
   check('只有登入那一次直接寫 users', writes === 1, `有 ${writes} 處`);
@@ -327,7 +330,7 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
     [...plan.matchAll(/user\.(\w+)\s*=\s*UNION\(\.\.\.me\./g)].map(m => m[1]))];
   check('讀得到整份 union 的欄位', unioned.length > 0, String(unioned));
 
-  const snap = (store.match(/Object\.assign\(state\.me, \{(.*?)\n    \}\);/s) || ['',''])[1];
+  const snap = (plan.match(/export function planSnapshot\([\s\S]*?\n\}/) || [''])[0];
   const clobbered = unioned.filter(f =>
     new RegExp(`${f}:\\s*Array\\.isArray\\(d\\.${f}\\)`).test(snap));
   check('持有清單不會被快照照抄覆蓋', !clobbered.length,
@@ -402,12 +405,12 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
 // → Firestore 整批拒絕 → 所有寫入停擺，而畫面上完全看不出來。
 // （v0.10.0 的 magicDay 就是這樣把所有人的寫入卡住的。）
 {
-  const mf = ((store.match(/const MIRROR_FIELDS = \[(.*?)\];/s) || ['',''])[1]
+  const mf = ((plan.match(/export const ABSOLUTE_FIELDS = \[(.*?)\];/s) || ['',''])[1]
               .match(/'(\w+)'/g) || []).map(x => x.replace(/'/g, ''));
   const blank = (store.match(/const blankMe = \(\) => \(\{(.*?)\}\);/s) || ['',''])[1];
-  const srv   = (store.match(/const srv = \{(.*?)\};/s) || ['',''])[1];
+  const srv   = (plan.match(/export const srvAbsolutes = \(d = \{\}\) => \(\{(.*?)\}\);/s) || ['',''])[1];
 
-  check('讀得到 MIRROR_FIELDS', mf.length > 0, String(mf.length));
+  check('讀得到 ABSOLUTE_FIELDS', mf.length > 0, String(mf.length));
   const noDefault = mf.filter(f => !new RegExp('\\b' + f + '\\s*:').test(blank));
   check('鏡像欄位都在 blankMe 有預設值', !noDefault.length, String(noDefault));
   const noSrv = mf.filter(f => !new RegExp('\\b' + f + '\\s*:').test(srv));
@@ -415,7 +418,10 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
 
   // 挑選鏡像欄位時一定要擋 undefined，不能直接 mir[f]
   check('pickMirror 有擋 undefined',
-        /export function pickMirror/.test(store) && /=== undefined/.test(store));
+        /export function pickMirror/.test(plan) && /=== undefined/.test(plan));
+  // 鏡像清單和絕對欄位清單是同一份，不會再有「這裡加了那裡忘了」
+  check('鏡像清單直接用 ABSOLUTE_FIELDS',
+        /const MIRROR_FIELDS = ABSOLUTE_FIELDS;/.test(store));
   // flush 的保險絲：寫出去之前把 undefined 清掉
   check('flush 寫出前會清掉 undefined',
         /是 undefined，這次先跳過它/.test(store));

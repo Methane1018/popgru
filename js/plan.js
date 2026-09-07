@@ -122,3 +122,121 @@ export const planDocIds = plan => [
   ...plan.visits.map(v => `grus/${v.gru}/visits/${v.from}`),
   ...(plan.global ? ['meta/global'] : []),
 ].filter(x => x !== 'users/');
+
+/* --------------------------------------------------------------- 讀進來 -- */
+// 快照回來的時候，每一個欄位要用「伺服器的」還是「本機的」？
+// 這個判斷以前埋在 onSnapshot 的回呼裡，而那需要連線才跑得動 ——
+// v0.11.2 / 0.11.3 / 0.11.4 有一半的成因就藏在下面這些規則裡。
+
+export const NO_NAME = '無名氏';
+export const realName = v =>
+  (typeof v === 'string' && v.trim() && v.trim() !== NO_NAME) ? v.trim() : null;
+
+// 合併「只增不減」的持有清單（寶物、技能、裝扮）。
+// 本機可能有還沒寫出去的新項目，伺服器可能有別的裝置加的 —— 兩邊都要留。
+export const mergeOwned = (local, server) => Array.from(new Set([
+  ...(Array.isArray(local)  ? local  : []),
+  ...(Array.isArray(server) ? server : []),
+]));
+
+// 「幫過誰幾下」這種只增不減的計數表：每個 key 取大的那一邊。
+// 照抄伺服器的話，本機剛記下、還沒寫出去的那幾下就被抹掉了。
+export const mergeCounts = (local, server) => {
+  const out = { ...(server && typeof server === 'object' ? server : {}) };
+  for (const [k, v] of Object.entries(local || {})) {
+    out[k] = Math.max(Number(out[k]) || 0, Number(v) || 0);
+  }
+  return out;
+};
+
+// 舊資料救援：v0.11.4 之前 helped 被寫成名字帶點的頂層欄位（"helped.<uid>"），
+// 因為 set(..., {merge:true}) 不把點號當路徑。那些數字是真的，只是放錯地方。
+export const readHelped = d => {
+  const out = { ...(d.helped && typeof d.helped === 'object' ? d.helped : {}) };
+  for (const [k, v] of Object.entries(d || {})) {
+    if (k.startsWith('helped.')) {
+      const uid = k.slice(7);
+      out[uid] = Math.max(Number(out[uid]) || 0, Number(v) || 0);
+    }
+  }
+  return out;
+};
+
+/**
+ * 每次快照都要重算的欄位。
+ *
+ * @param prev    現在的 state.me
+ * @param d       伺服器給的文件內容
+ * @param gruHat  自己格魯頭上戴的帽子（舊制只存在 grus.hat，要視同已解鎖）
+ * @param pend    還沒送到伺服器的量 { n, fish, gold, inc:{欄位:數字} }
+ */
+export function planSnapshot({ prev, d = {}, gruHat = null, pend = {} } = {}) {
+  const inc = f => (pend.inc && pend.inc[f]) || 0;
+  return {
+    // 伺服器的數字 ＋ 還沒寫出去的量。
+    // 直接照抄的話，任何一次非 flush 的寫入（買帽子、改暱稱、收信箱）
+    // 都會推來一份「還沒算進你剛才那些點擊」的快照，畫面就往回跳。
+    lifetime: (d.lifetime||0) + (pend.n||0)    + inc('lifetime'),
+    fish:     (d.fish    ||0) + (pend.fish||0) + inc('fish'),
+    goldfish: (d.goldfish||0) + (pend.gold||0) + inc('goldfish'),
+    medals:   (d.medals  ||0) + inc('medals'),
+    giftsReceived: (d.giftsReceived||0) + inc('giftsReceived'),
+
+    // 只增不減的清單一律取聯集，照抄會把剛拿到的抹掉
+    ownedHats:  mergeOwned(mergeOwned(prev.ownedHats, d.ownedHats),
+                           gruHat ? [gruHat] : []),
+    ownedSkins: mergeOwned(prev.ownedSkins, d.ownedSkins),
+    treasures:  mergeOwned(prev.treasures,  d.treasures),
+    skills:     mergeOwned(prev.skills,     d.skills),
+
+    // 換來的技能點只有本人會加，取大的那邊就不會被慢一拍的快照拉回去
+    spBought: Math.max(prev.spBought || 0, d.spBought || 0),
+    helped:   mergeCounts(prev.helped, readHelped(d)),
+
+    nick:       realName(d.nick),
+    googleName: realName(d.googleName) || prev.googleName,
+    name:       realName(d.nick) || realName(d.googleName) || prev.googleName || NO_NAME,
+    photo:      d.photo || prev.photo,
+  };
+}
+
+// 「絕對值」欄位：只有這台裝置在寫，而快照永遠比本機慢一拍。
+// 每次都照抄回來的話，還沒寫出去的增量就會被洗掉 ——
+// 症狀就是幫忙額度自己跳回 300、連續天數莫名歸零（v0.9 的災難）。
+// 所以只在第一次載入時採用伺服器的值，之後一律以本機為準。
+export const ABSOLUTE_FIELDS = [
+  'streak','bestStreak','lastDay','todayCount','helpToday','helpDay',
+  'freezes','double','magicDay','goldTick','magicHand',
+];
+
+export const srvAbsolutes = (d = {}) => ({
+  streak:d.streak||0, bestStreak:d.bestStreak||0,
+  lastDay:d.lastDay||null, todayCount:d.todayCount||0,
+  helpToday:d.helpToday||0, helpDay:d.helpDay||null,
+  freezes:d.freezes||0, double:d.double||0,
+  magicDay:d.magicDay||null, goldTick:d.goldTick||0,
+  magicHand:d.magicHand||null,
+});
+
+// 本機鏡像只要「不比伺服器舊」就以本機為準。
+// 'YYYY-MM-DD' 直接字串比大小就等於比日期。
+export const preferMirror = (mir, srv) =>
+  !!mir && (mir.lastDay || '') >= (srv.lastDay || '');
+
+/**
+ * 從鏡像和伺服器值裡挑出要用的絕對欄位。
+ *
+ * 鏡像可能是舊版本寫下的，缺了後來才新增的欄位（magicDay 就是這樣中的）。
+ * 那時候一定要退回伺服器值 —— 絕對不能讓 undefined 流出去：
+ * Firestore 收到 undefined 會**整批拒絕**，於是連點擊都送不出去，
+ * 而畫面上完全看不出來，只有主控台在噴。（v0.10.1）
+ */
+export function pickMirror(mir, srv, useMirror) {
+  const out = {};
+  for (const f of ABSOLUTE_FIELDS) {
+    const a = useMirror ? (mir ? mir[f] : undefined) : srv[f];
+    const v = a === undefined ? srv[f] : a;
+    out[f] = v === undefined ? null : v;
+  }
+  return out;
+}

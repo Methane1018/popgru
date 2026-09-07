@@ -992,5 +992,111 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   }
 }
 
+/* ============== planSnapshot：快照回來時「哪個值該贏」 ==============
+   這一段跟 planFlush 那段是一體兩面。v0.11.2 / 0.11.3 / 0.11.4
+   有一半的成因藏在這些規則裡，而它們過去只在 onSnapshot 回呼裡跑得到。   */
+{
+  const P = await import('../js/plan.js');
+  const prev0 = {
+    lifetime:0, fish:0, goldfish:0, medals:0, giftsReceived:0,
+    ownedHats:[], ownedSkins:[], treasures:[], skills:[],
+    spBought:0, helped:{}, googleName:null, photo:null,
+  };
+  const snap = (d, o = {}) => P.planSnapshot({ prev: prev0, d, ...o });
+
+  // ── v0.11.2：伺服器的數字 ＋ 本機還沒送出的 ──
+  {
+    const r = snap({ lifetime: 100 }, { pend: { n: 7 } });
+    ok('★ 累計要加上待送量', r.lifetime === 107, String(r.lifetime));
+    ok('沒有待送量時就是伺服器的值', snap({ lifetime: 100 }).lifetime === 100);
+  }
+
+  // ── v0.10.9：花掉的錢也要算進去，不然畫面會退錢 ──
+  {
+    const r = snap({ goldfish: 20 }, { pend: { inc: { goldfish: -5 } } });
+    ok('★ 剛花掉的金魚不會被退回來', r.goldfish === 15, String(r.goldfish));
+    const r2 = snap({ fish: 500 }, { pend: { fish: 3, inc: { fish: -60 } } });
+    ok('★ 賺到的和花掉的一起算', r2.fish === 443, String(r2.fish));
+  }
+
+  // ── v0.11.3：收信箱拿到的金牌、收禮數也要算 ──
+  {
+    const r = snap({ medals: 2, giftsReceived: 9 },
+                   { pend: { inc: { medals: 1, giftsReceived: 1 } } });
+    ok('★ 剛收到的金牌不會消失', r.medals === 3, String(r.medals));
+    ok('★ 收禮數也一樣', r.giftsReceived === 10, String(r.giftsReceived));
+  }
+
+  // ── v0.10.5：只增不減的清單要取聯集，不能照抄 ──
+  {
+    const prev = { ...prev0, skills:['press1'], treasures:['sweat'], ownedSkins:['bg:ice'] };
+    const r = P.planSnapshot({ prev, d: { skills: [], treasures: [], ownedSkins: [] } });
+    ok('★ 伺服器還沒有的技能不會被抹掉', r.skills.includes('press1'), r.skills.join(','));
+    ok('★ 寶物同理', r.treasures.includes('sweat'));
+    ok('★ 剛買的裝扮同理', r.ownedSkins.includes('bg:ice'));
+    const r2 = P.planSnapshot({ prev, d: { skills:['social1'] } });
+    ok('★ 別的裝置學的也會收進來',
+       r2.skills.includes('press1') && r2.skills.includes('social1'), r2.skills.join(','));
+  }
+
+  // ── 舊制的帽子只存在 grus.hat，要視同已解鎖（不能讓人白花錢）──
+  {
+    const r = snap({ ownedHats: [] }, { gruHat: '🎩' });
+    ok('★ 頭上戴著的帽子算已解鎖', r.ownedHats.includes('🎩'), r.ownedHats.join(','));
+    ok('沒戴帽子就不會亂加', snap({ ownedHats: [] }).ownedHats.length === 0);
+  }
+
+  // ── v0.11.4：helped 要合併，而且救得回舊格式 ──
+  {
+    const prev = { ...prev0, helped: { a: 3 } };
+    const r = P.planSnapshot({ prev, d: { helped: {} } });
+    ok('★ 本機記下的幫忙紀錄不會被抹掉', r.helped.a === 3, JSON.stringify(r.helped));
+    const r2 = P.planSnapshot({ prev, d: { 'helped.b': 7 } });
+    ok('★ 救得回舊格式（名字帶點的欄位）',
+       r2.helped.b === 7 && r2.helped.a === 3, JSON.stringify(r2.helped));
+    const r3 = P.planSnapshot({ prev, d: { helped: { a: 9 } } });
+    ok('★ 伺服器比較多時採用伺服器的', r3.helped.a === 9, JSON.stringify(r3.helped));
+  }
+
+  // ── 換來的技能點不能被慢一拍的快照拉回去 ──
+  {
+    const prev = { ...prev0, spBought: 5 };
+    ok('★ 換來的點數取大值', P.planSnapshot({ prev, d: { spBought: 2 } }).spBought === 5);
+    ok('別的裝置換的也收得到', P.planSnapshot({ prev, d: { spBought: 9 } }).spBought === 9);
+  }
+
+  // ── 名字：暱稱 > Google 名 > 無名氏，而且「無名氏」不算真名 ──
+  {
+    ok('★ 有暱稱就用暱稱', snap({ nick:'阿米', googleName:'Amy' }).name === '阿米');
+    ok('沒暱稱就用 Google 名', snap({ googleName:'Amy' }).name === 'Amy');
+    ok('★ 都沒有才是無名氏', snap({}).name === P.NO_NAME, snap({}).name);
+    ok('★ 有人把暱稱打成「無名氏」不算數',
+       snap({ nick:P.NO_NAME, googleName:'Amy' }).name === 'Amy');
+    ok('空白暱稱不算數', snap({ nick:'   ', googleName:'Amy' }).name === 'Amy');
+  }
+
+  // ── 絕對欄位：第一次載入才看伺服器，之後以本機為準 ──
+  {
+    const srv = P.srvAbsolutes({ streak: 4, lastDay: '2026-09-01' });
+    ok('★ 伺服器缺的欄位有預設值',
+       P.ABSOLUTE_FIELDS.every(f => srv[f] !== undefined), JSON.stringify(srv));
+    ok('★ 鏡像比較新就用鏡像',
+       P.preferMirror({ lastDay:'2026-09-08' }, srv) === true);
+    ok('★ 鏡像比較舊就用伺服器',
+       P.preferMirror({ lastDay:'2026-08-01' }, srv) === false);
+    ok('沒有鏡像就用伺服器', P.preferMirror(null, srv) === false);
+  }
+
+  // ── 純度 ──
+  {
+    const a = JSON.stringify(snap({ lifetime: 5 }));
+    const b = JSON.stringify(snap({ lifetime: 5 }));
+    ok('★ 同樣輸入永遠同樣輸出', a === b);
+    const frozen = { ...prev0 };
+    snap({ lifetime: 5 });
+    ok('★ 不會偷改傳進來的狀態', JSON.stringify(frozen) === JSON.stringify(prev0));
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

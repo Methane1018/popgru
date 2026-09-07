@@ -10,8 +10,14 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.12.0';
-import { planFlush, isInc, isUnion, isNow } from './plan.js?v=0.12.0';
+} from './config.js?v=0.12.1';
+import {
+  planFlush, planSnapshot, isInc, isUnion, isNow,
+  NO_NAME, realName, mergeOwned, mergeCounts, readHelped,
+  pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS,
+} from './plan.js?v=0.12.1';
+// 這幾個是純決策，定義在 plan.js；這裡轉出去讓呼叫端和測試照舊拿得到
+export { mergeOwned, mergeCounts, readHelped, pickMirror };
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -27,8 +33,6 @@ export const configured = Object.keys(firebaseConfig).length > 0;
 // 「無名氏」是顯示用的佔位字串，不是名字。
 // 舊版曾經把它寫進資料庫（ownerName / name），所以讀的時候要濾掉，
 // 寫的時候也絕對不寫進去 —— 否則佔位字串會變成某人真正的名字。
-const NO_NAME = '無名氏';
-const realName = v => (typeof v === 'string' && v.trim() && v.trim() !== NO_NAME) ? v.trim() : null;
 
 const pad = n => String(n).padStart(2, '0');
 export const dayStr = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
@@ -197,7 +201,8 @@ function outboxSettle(uid, target, n, fish, gold) {
 // 這樣就算伺服器那邊完全沒寫進去，重整也不會掉。
 // 前段是「絕對值」欄位（只有這台裝置在寫，遺失就回不來）；
 // 後段是顯示用的數字，載入時先拿來墊著，免得畫面閃一下 0 再跳回真值。
-const MIRROR_FIELDS = ['streak','bestStreak','lastDay','todayCount','helpToday','helpDay','freezes','double','magicDay','goldTick','magicHand'];
+// 單一來源：跟 plan.js 用同一份清單，不會再有「這裡加了那裡忘了」
+const MIRROR_FIELDS = ABSOLUTE_FIELDS;
 const MIRROR_DISPLAY = ['lifetime','fish','goldfish','medals','treasures','skills'];
 const MIRROR_ALL = [...MIRROR_FIELDS, ...MIRROR_DISPLAY];
 
@@ -222,55 +227,6 @@ function prefillFromMirror() {
   for (const f of MIRROR_ALL) if (o[f] !== undefined) state.me[f] = o[f];
   mirroredMe = true;          // 從這一刻起，畫面上的數字不是訪客的
   return true;
-}
-
-// 從鏡像和伺服器值裡挑出要用的「絕對值」欄位。
-//
-// 鏡像可能是舊版本寫下的，缺了後來才新增的欄位（magicDay 就是這樣中的）。
-// 那時候一定要退回伺服器值 —— 絕對不能讓 undefined 流進 state.me：
-// Firestore 收到 undefined 會**整批拒絕**，於是連點擊都送不出去，
-// 而畫面上完全看不出來，只有主控台在噴。
-//
-// 這是「新增一個 MIRROR_FIELDS 欄位」時必然會踩到的坑，跟欄位是什麼無關，
-// 所以修在這裡而不是修 magicDay。
-// 合併「只增不減」的持有清單（寶物、技能）。
-// 本機可能有還沒寫出去的新項目，伺服器可能有別的裝置加的 —— 兩邊都要留。
-// 「幫過誰幾下」這種只增不減的計數表：每個 key 取大的那一邊。
-// 照抄伺服器的話，本機剛記下、還沒寫出去的那幾下就被抹掉了。
-export const mergeCounts = (local, server) => {
-  const out = { ...(server && typeof server === 'object' ? server : {}) };
-  for (const [k, v] of Object.entries(local || {})) {
-    out[k] = Math.max(Number(out[k]) || 0, Number(v) || 0);
-  }
-  return out;
-};
-
-// 舊資料救援：v0.11.4 之前寫成了名字帶點的頂層欄位（"helped.<uid>"），
-// 那些數字是真的，只是放錯地方。讀回來併進 helped，大家的進度才不會白費。
-export const readHelped = d => {
-  const out = { ...(d.helped && typeof d.helped === 'object' ? d.helped : {}) };
-  for (const [k, v] of Object.entries(d || {})) {
-    if (k.startsWith('helped.')) {
-      const uid = k.slice(7);
-      out[uid] = Math.max(Number(out[uid]) || 0, Number(v) || 0);
-    }
-  }
-  return out;
-};
-
-export const mergeOwned = (local, server) => Array.from(new Set([
-  ...(Array.isArray(local)  ? local  : []),
-  ...(Array.isArray(server) ? server : []),
-]));
-
-export function pickMirror(mir, srv, useMirror) {
-  const out = {};
-  for (const f of MIRROR_FIELDS) {
-    const a = useMirror ? (mir ? mir[f] : undefined) : srv[f];
-    const v = a === undefined ? srv[f] : a;
-    out[f] = v === undefined ? null : v;
-  }
-  return out;
 }
 
 function mirrorRead(uid) {
@@ -415,49 +371,25 @@ async function onSignedIn(user) {
     // 伺服器的數字 ＋ 還沒寫出去的量。直接照抄伺服器的話，
     // 任何一次非 flush 的寫入（買帽子、買外觀、改暱稱、收信箱）都會
     // 推來一份「還沒算進你剛才那些點擊」的快照，畫面就往回跳。
-    Object.assign(state.me, {
-      lifetime: (d.lifetime||0) + state.pending + inflight.n    + pendIncOf('lifetime'),
-      fish:     (d.fish    ||0) + pendFish      + inflight.fish  + pendIncOf('fish'),
-      goldfish: (d.goldfish||0) + pendGold      + inflight.gold  + pendIncOf('goldfish'),
-      medals:   (d.medals||0) + pendIncOf('medals'),
-      // 舊制買過的帽子（只存在 grus.hat）視同已解鎖，不能讓人白花錢
-      ownedHats: mergeOwned(mergeOwned(state.me.ownedHats, d.ownedHats),
-                            state.myGru.hat ? [state.myGru.hat] : []),
-      // 跟寶物、技能一樣是只增不減，照抄會把剛買的裝扮抹掉
-      ownedSkins: mergeOwned(state.me.ownedSkins, d.ownedSkins),
-      // 這兩個是「只增不減」而且用 arrayUnion 寫出去的，所以要取聯集不能照抄。
-      // 照抄的話，從 learnSkill() 到 flush() 真的寫進去之間（最長 20 秒），
-      // 任何一次快照回音都會把剛學的技能／剛掉的寶物抹掉 ——
-      // 畫面上就是「點過的技能又變成可以點」。
-      treasures: mergeOwned(state.me.treasures, d.treasures),
-      skills:    mergeOwned(state.me.skills,    d.skills),
-      // 換來的點數只有本人會加，取大的那邊就不會被慢一拍的快照拉回去
-      spBought:  Math.max(state.me.spBought || 0, d.spBought || 0),
-      helped: mergeCounts(state.me.helped, readHelped(d)),
-      giftsReceived: (d.giftsReceived||0) + pendIncOf('giftsReceived'),
-      nick: realName(d.nick),
-      googleName: realName(d.googleName) || state.me.googleName,
-      name: realName(d.nick) || realName(d.googleName) || state.me.googleName || NO_NAME,
-      photo: d.photo || state.me.photo,
-    });
+    // 「哪個值該贏」的規則全部在 planSnapshot() 裡 —— 那是純函式，測得到。
+    Object.assign(state.me, planSnapshot({
+      prev: state.me, d, gruHat: state.myGru.hat,
+      pend: {
+        n:    state.pending + inflight.n,
+        fish: pendFish      + inflight.fish,
+        gold: pendGold      + inflight.gold,
+        inc:  pendIncAll(),
+      },
+    }));
 
     // 下面這些是「絕對值」欄位，只有這台裝置在寫，而快照永遠比本機慢一拍。
     // 每次都照抄回來的話，還沒寫出去的增量就會被洗掉 ——
     // 症狀就是幫忙額度自己跳回 300、連續天數莫名歸零。
     // 所以只在第一次載入時採用伺服器的值，之後以本機為準。
     if (first) {
-      const srv = {
-        streak:d.streak||0, bestStreak:d.bestStreak||0,
-        lastDay:d.lastDay||null, todayCount:d.todayCount||0,
-        helpToday:d.helpToday||0, helpDay:d.helpDay||null,
-        freezes:d.freezes||0, double:d.double||0,
-        magicDay:d.magicDay||null, goldTick:d.goldTick||0,
-        magicHand:d.magicHand||null,
-      };
-      // 本機鏡像只要「不比伺服器舊」就以本機為準。
-      // 'YYYY-MM-DD' 直接字串比大小就等於比日期。
+      const srv = srvAbsolutes(d);
       const mir = mirrorRead(uid);
-      const useMirror = !!mir && (mir.lastDay || '') >= (srv.lastDay || '');
+      const useMirror = preferMirror(mir, srv);
       Object.assign(state.me, pickMirror(mir, srv, useMirror));
       state.me.loaded = true;      // 有了這個，flush() 才會開始寫
       repairStreak();
@@ -726,6 +658,12 @@ let inflightInc = {};        // 已經送出、但還沒收到回音的那批 qu
 // 快照拿回來的是伺服器的舊數字，不加上這個就會把剛買的東西「退錢」——
 // 症狀就是用金魚買寶物之後，點一下畫面又變回原來的金魚數。
 const pendIncOf = f => (pendInc[f] || 0) + (inflightInc[f] || 0);
+// 排隊中 ＋ 送出中的所有增減，攤成一個物件交給 planSnapshot()
+const pendIncAll = () => {
+  const out = { ...inflightInc };
+  for (const [f, v] of Object.entries(pendInc)) out[f] = (out[f] || 0) + v;
+  return out;
+};
 // 對外只是為了看得見（測試與主控台除錯用）
 export const pendingDelta = f => pendIncOf(f);
 let failCount = 0, blockedLogged = false;
