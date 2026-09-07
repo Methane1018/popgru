@@ -5,8 +5,11 @@ cd "$(dirname "$0")/.."
 TMP=$(mktemp -d)
 echo '{"type":"module"}' > "$TMP/package.json"
 cp js/config.js "$TMP/config.js"
-sed "s|'./config.js?v=[0-9A-Za-z.\-]*'|'./config.js'|" js/store.js > "$TMP/store.js"
+cp js/plan.js   "$TMP/plan.js"
+sed -e "s|'./config.js?v=[0-9A-Za-z.\-]*'|'./config.js'|" \
+    -e "s|'./plan.js?v=[0-9A-Za-z.\-]*'|'./plan.js'|" js/store.js > "$TMP/store.js"
 sed -e "s|'../js/store.js'|'./store.js'|" -e "s|'../js/config.js'|'./config.js'|" \
+    -e "s|'../js/plan.js'|'./plan.js'|" \
     test/logic.test.mjs > "$TMP/logic.test.mjs"
 node "$TMP/logic.test.mjs"
 rm -rf "$TMP"

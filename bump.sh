@@ -22,6 +22,7 @@ else
   sed -i '' "s/app\.js?v=$E/app.js?v=$NEW/"       index.html
   sed -i '' "s/store\.js?v=$E/store.js?v=$NEW/"   js/app.js
   sed -i '' "s/config\.js?v=$E/config.js?v=$NEW/" js/app.js js/store.js
+  sed -i '' "s/plan\.js?v=$E/plan.js?v=$NEW/"     js/store.js
   echo "版本 $CUR → $NEW"
 fi
 echo

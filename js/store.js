@@ -10,7 +10,8 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.11.4';
+} from './config.js?v=0.12.0';
+import { planFlush, isInc, isUnion, isNow } from './plan.js?v=0.12.0';
 
 const CDN       = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}`;
 const GUEST_KEY = 'popgru.guest';
@@ -745,6 +746,21 @@ function scheduleFlush() {
 // 所以這裡只記「意圖」（要加多少、要加哪些、要設成什麼），
 // FieldValue 等到 flush 的時候才組出來，合併規則才會是對的。
 let pendInc = {}, pendUnion = {}, pendSet = {}, pendReconcile = false;
+// 把 planFlush() 給的意圖換成真正的 FieldValue。
+// 這是唯一一個知道 Firebase 長什麼樣的地方，所以也是唯一不需要測試的地方 ——
+// 它沒有任何判斷，只有翻譯。
+function materialize(obj, F) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (isNow(v))        out[k] = F.serverTimestamp();
+    else if (isInc(v))   out[k] = F.increment(v.__inc);
+    else if (isUnion(v)) out[k] = F.arrayUnion(...v.__union);
+    else if (v && typeof v === 'object' && !Array.isArray(v)) out[k] = materialize(v, F);
+    else                 out[k] = v;
+  }
+  return out;
+}
+
 const queueInc   = (f, n) => { pendInc[f] = (pendInc[f] || 0) + n; };   // 相加
 const queueUnion = (f, v) => { (pendUnion[f] ||= new Set()).add(v); };  // 取聯集
 const queueSet   = (f, v) => { pendSet[f] = v; };                       // 絕對值，新的贏
@@ -781,75 +797,17 @@ export async function flush() {
   pendMagic = { uid:null, n:0 };
   const { F, db } = fb, me = state.me;
   try {
+    // 「要寫什麼」全部在 planFlush() 裡決定 —— 那是純函式，測得到。
+    // 這裡只負責把意圖換成 FieldValue 然後送出去。
+    const plan = planFlush({ me, n, fish, gold, target, inc, uni, set, magic, now: Date.now() });
+    plan.warnings.forEach(k =>
+      console.error(`POPGRU 欄位 ${k} 是 undefined，這次先跳過它（這是 bug）`));
+
     const b = F.writeBatch(db);
-    // 走到這裡代表個人資料一定讀進來了（上面擋掉了），所以絕對欄位一律寫回去。
-    const p = {
-      lastSeen: F.serverTimestamp(),
-      streak: me.streak, bestStreak: me.bestStreak, lastDay: me.lastDay,
-      todayCount: me.todayCount, helpToday: me.helpToday, helpDay: me.helpDay,
-      freezes: me.freezes, double: me.double, magicDay: me.magicDay,
-      goldTick: me.goldTick, magicHand: me.magicHand,
-      ...set,
-    };
-    for (const [f, v] of Object.entries(inc))  if (v) p[f] = F.increment(v);
-    for (const [f, s] of Object.entries(uni))  if (s.size) p[f] = F.arrayUnion(...s);
-    // 保險絲：只要有一個欄位是 undefined，Firestore 就會拒絕整批寫入，
-    // 連帶所有累積的點擊都送不出去。寧可少寫一個欄位也不要全部停擺 ——
-    // 但一定要吼出來，這種情況永遠是 bug。
-    for (const k of Object.keys(p)) {
-      if (p[k] === undefined) {
-        console.error(`POPGRU 欄位 ${k} 是 undefined，這次先跳過它（這是 bug）`);
-        delete p[k];
-      }
-    }
-
-    // 持有清單每次都整份 union 回去，不倚賴那一筆 patch 活到寫入成功為止。
-    // 之前是「學會時排一筆 arrayUnion」，但 pendPatch 不在待送匣裡：
-    // 只要遇到一次寫入失敗又剛好關了頁面，那筆就永遠消失，
-    // 伺服器上沒有那個技能 —— 重整之後就又變成可以學。
-    // 整份 union 是冪等的，成本也只有幾個字串，所以每次都送。
-    if (me.skills?.length)    p.skills    = F.arrayUnion(...me.skills);
-    if (me.treasures?.length) p.treasures = F.arrayUnion(...me.treasures);
-
-    if (n)    p.lifetime = F.increment(n);
-    if (fish) p.fish     = F.increment(fish);
-    if (gold) p.goldfish = F.increment(gold);
-    b.set(userRef(me.uid), p, { merge:true });
-
-    // 小圈子總數先算好再寫一次 ——
-    // 同一個批次不能對同一份文件寫兩次，而魔法手也要加進總數。
-    let globalAdd = 0;
-    if (n && target) {
-      b.set(gruRef(target), { squashes: F.increment(n), lastSquashedAt: F.serverTimestamp() }, { merge:true });
-      if (target !== me.uid) {                       // 幫別人壓 → 在他家留下足跡
-        b.set(visitRef(target, me.uid), {
-          name: me.name, photo: me.photo, count: F.increment(n), at: F.serverTimestamp(),
-        }, { merge:true });
-        // ⚠️ 不能寫成 p['helped.' + target] ——
-        // set(..., {merge:true}) 不會把點號當成路徑（只有 update() 會），
-        // 那樣會在伺服器上長出一個名字裡有點的頂層欄位，helped 這個 map 永遠是空的。
-        // 巢狀物件寫進去才是對的，sentinel 在任何深度都有效。
-        p.helped = { ...(p.helped || {}), [target]: F.increment(n) };
-      }
-      globalAdd += n;
-    }
-    // 👋 魔法手留下的那隻手：你在自己家壓的那些，同一批也落在朋友家
-    if (magic.n && magic.uid && magic.uid !== target) {
-      b.set(gruRef(magic.uid),
-        { squashes: F.increment(magic.n), lastSquashedAt: F.serverTimestamp() }, { merge:true });
-      b.set(visitRef(magic.uid, me.uid), {
-        name: me.name, photo: me.photo, count: F.increment(magic.n),
-        at: F.serverTimestamp(), magic: true,
-      }, { merge:true });
-      p.helped = { ...(p.helped || {}), [magic.uid]: F.increment(magic.n) };
-      globalAdd += magic.n;
-    }
-    if (globalAdd) {
-      b.set(globalRef(), {
-        squashes: F.increment(globalAdd),
-        lastSquasher: { uid: me.uid, name: me.name, at: Date.now() },
-      }, { merge:true });
-    }
+    b.set(userRef(me.uid), materialize(plan.user, F), { merge:true });
+    for (const g of plan.grus)   b.set(gruRef(g.uid), materialize(g.data, F), { merge:true });
+    for (const v of plan.visits) b.set(visitRef(v.gru, v.from), materialize(v.data, F), { merge:true });
+    if (plan.global)             b.set(globalRef(), materialize(plan.global, F), { merge:true });
     await b.commit();
     if (n || fish || gold) outboxSettle(me.uid, target, n, fish, gold);   // 確定寫進去了才扣
     failCount = 0;

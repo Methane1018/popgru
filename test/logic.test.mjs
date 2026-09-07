@@ -881,5 +881,116 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   S.state.viewing = { ...S.state.myGru, isMine:true };
 }
 
+/* ================= planFlush：五個歷史 bug 各一條（v0.12.0） =================
+   這一段是這次重構真正的目的。
+   下面每一條都對應一個已經上線炸過的 bug，而它們過去全部躲在 flush() 裡面 ——
+   那個函式要連線才跑得動，所以測試從來看不到它。                              */
+{
+  const P = await import('../js/plan.js');
+  const baseMe = {
+    uid:'me', name:'我', photo:null,
+    streak:3, bestStreak:9, lastDay:'2026-09-08', todayCount:5,
+    helpToday:0, helpDay:null, freezes:2, double:0,
+    magicDay:null, goldTick:7, magicHand:null,
+    skills:['press1'], treasures:['sweat'],
+  };
+  const plan = o => P.planFlush({ me: baseMe, now: 111, ...o });
+
+  // ── 絕對欄位一定要寫出去（v0.9 連勝歸零）──
+  {
+    const u = plan({}).user;
+    for (const f of ['streak','bestStreak','lastDay','todayCount',
+                     'helpToday','helpDay','freezes','double',
+                     'magicDay','goldTick','magicHand']) {
+      ok(`★ 絕對欄位 ${f} 每次都寫出去`, f in u, JSON.stringify(Object.keys(u)));
+    }
+  }
+
+  // ── v0.10.1：undefined 會讓 Firestore 拒絕整批 ──
+  {
+    const r = P.planFlush({ me: { ...baseMe, goldTick: undefined }, now: 111 });
+    ok('★ undefined 欄位會被拿掉', !('goldTick' in r.user), JSON.stringify(r.user.goldTick));
+    ok('★ 而且會回報是哪個欄位', r.warnings.includes('goldTick'), JSON.stringify(r.warnings));
+    ok('★ 其他欄位不受影響（不會整批失敗）', r.user.streak === 3);
+  }
+
+  // ── v0.10.4：持有清單每次整份 union，不倚賴補償寫入 ──
+  {
+    const u = plan({}).user;
+    ok('★ skills 每次都整份送出',
+       P.isUnion(u.skills) && u.skills.__union.includes('press1'), JSON.stringify(u.skills));
+    ok('★ treasures 也是',
+       P.isUnion(u.treasures) && u.treasures.__union.includes('sweat'));
+    const empty = P.planFlush({ me: { ...baseMe, skills:[], treasures:[] }, now:111 });
+    ok('沒有東西時就不送', !('skills' in empty.user) && !('treasures' in empty.user));
+  }
+
+  // ── v0.10.5：排隊中的增減要變成一個 INC，不是互相覆蓋 ──
+  {
+    const u = plan({ inc: { goldfish: -17 }, uni: { ownedSkins: new Set(['a','b']) } }).user;
+    ok('★ 累加後的扣款送出一次', P.isInc(u.goldfish) && u.goldfish.__inc === -17,
+       JSON.stringify(u.goldfish));
+    ok('★ 聯集送出整組', P.isUnion(u.ownedSkins) && u.ownedSkins.__union.length === 2,
+       JSON.stringify(u.ownedSkins));
+    ok('★ 值是 0 的就不送', !('fish' in plan({ inc: { fish: 0 } }).user));
+  }
+
+  // ── v0.11.4：helped 要巢狀，不能是 'helped.<uid>' ──
+  {
+    const r = plan({ n: 5, target: 'friend' });
+    ok('★ helped 是巢狀物件', !!r.user.helped && P.isInc(r.user.helped.friend),
+       JSON.stringify(r.user.helped));
+    ok('★ 沒有名字帶點的欄位',
+       !Object.keys(r.user).some(k => k.includes('.')), JSON.stringify(Object.keys(r.user)));
+    ok('★ 壓自己家不會記成幫忙',
+       !plan({ n:5, target:'me' }).user.helped, JSON.stringify(plan({n:5,target:'me'}).user.helped));
+  }
+
+  // ── 同一批不能對同一份文件寫兩次（Firestore 會直接拒絕）──
+  {
+    const r = plan({ n: 5, target: 'me', magic: { uid:'friend', n: 3 } });
+    const ids = P.planDocIds(r);
+    ok('★ 沒有重複的文件', new Set(ids).size === ids.length, ids.join(' '));
+    ok('★ 小圈子總數只寫一次而且是加總',
+       r.global && r.global.squashes.__inc === 8, JSON.stringify(r.global));
+    ok('★ 魔法手會留下足跡', r.visits.some(v => v.gru === 'friend' && v.data.magic === true),
+       JSON.stringify(r.visits));
+    ok('★ 兩隻格魯都被寫到', r.grus.length === 2, JSON.stringify(r.grus.map(g => g.uid)));
+
+    // 防禦性：萬一「正在壓的對象」剛好就是「魔法手的對象」，
+    // 也絕對不能對同一份文件寫兩次 —— Firestore 會直接拒絕整批。
+    const clash = plan({ n: 5, target: 'friend', magic: { uid:'friend', n: 3 } });
+    const cids = P.planDocIds(clash);
+    ok('★ 對象撞在一起時也不會重複寫', new Set(cids).size === cids.length, cids.join(' '));
+    ok('★ 撞在一起時只留一隻格魯', clash.grus.length === 1,
+       JSON.stringify(clash.grus.map(g => g.uid)));
+  }
+
+  // ── 幫別人壓 vs 壓自己家 ──
+  {
+    const home = plan({ n: 4, target: 'me' });
+    ok('壓自己家不留足跡', home.visits.length === 0);
+    ok('壓自己家也算進小圈子', home.global.squashes.__inc === 4);
+    const away = plan({ n: 4, target: 'friend' });
+    ok('★ 幫別人會在他家留足跡',
+       away.visits.length === 1 && away.visits[0].gru === 'friend');
+    ok('★ 足跡帶著自己的名字', away.visits[0].data.name === '我');
+  }
+
+  // ── 沒事做的時候不該寫任何格魯或總數 ──
+  {
+    const idle = plan({});
+    ok('★ 沒壓就不寫格魯', idle.grus.length === 0);
+    ok('★ 沒壓就不寫小圈子總數', idle.global === null);
+  }
+
+  // ── 純度：planFlush 不能碰到 Firebase，也不能有隱藏時間 ──
+  {
+    const a = JSON.stringify(plan({ n:1, target:'x' }));
+    const b = JSON.stringify(plan({ n:1, target:'x' }));
+    ok('★ 同樣輸入永遠同樣輸出', a === b);
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

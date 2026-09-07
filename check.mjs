@@ -6,6 +6,9 @@ import { readFileSync } from 'fs';
 const app   = readFileSync('js/app.js', 'utf8');
 const store = readFileSync('js/store.js', 'utf8');
 const cfg   = readFileSync('js/config.js', 'utf8');
+const plan  = readFileSync('js/plan.js', 'utf8');
+// 決策層搬到 plan.js 之後，很多規則要看的是那個檔案
+const write = store + '\n' + plan;
 const html  = readFileSync('index.html', 'utf8');
 
 let bad = 0;
@@ -17,7 +20,7 @@ const check = (name, ok, detail = '') => {
 // 1) flush() 寫回的絕對欄位，必須跟第一次快照讀進來的欄位一字不差。
 //    少一邊就會出現「幫忙額度自己跳回 300」「連續天數歸零」。
 {
-  const w = store.match(/const p = \{\s*lastSeen: F\.serverTimestamp\(\),(.*?)\.\.\.set,/s);
+  const w = plan.match(/const user = \{\s*lastSeen: NOW,(.*?)\.\.\.set,/s);
   const r = store.match(/const srv = \{(.*?)\};/s);
   if (!w || !r) check('flush 與快照的絕對欄位區塊都存在', false, '找不到其中一段');
   else {
@@ -40,7 +43,7 @@ const check = (name, ok, detail = '') => {
   if (!mf) check('MIRROR_FIELDS 存在', false);
   else {
     const M = new Set([...mf[1].matchAll(/'(\w+)'/g)].map(m => m[1]));
-    const W = new Set([...(store.match(/const p = \{\s*lastSeen: F\.serverTimestamp\(\),(.*?)\.\.\.set,/s) || ['',''])[1]
+    const W = new Set([...(plan.match(/const user = \{\s*lastSeen: NOW,(.*?)\.\.\.set,/s) || ['',''])[1]
                         .matchAll(/(\w+):/g)].map(m => m[1]));
     const onlyW = [...W].filter(x => !M.has(x));
     const onlyM = [...M].filter(x => !W.has(x));
@@ -174,16 +177,37 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   }
 }
 
+// plan.js 是決策層。它之所以測得到，是因為它**結構上不可能**碰到 Firebase ——
+// 一旦有人在裡面 import 了什麼，這個保證就沒了，
+// 而且下次又會變成「錯誤躲在要連線才跑得動的地方」。
+{
+  check('plan.js 沒有任何 import', !/^\s*import\s/m.test(plan) && !/require\(/.test(plan),
+        '有 import 就不再是純函式了');
+  // 註解裡提到 Firestore 是好事（那是在解釋為什麼），要掃的是程式碼
+  const planCode = plan.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  check('plan.js 的程式碼不碰 Firebase',
+        !/firebase|firestore|F\.increment|F\.arrayUnion|serverTimestamp\(/i.test(planCode));
+  check('flush 走 planFlush', /planFlush\(\{ me, n, fish, gold, target/.test(store));
+  // flush() 自己不該再組 FieldValue —— 那是 materialize() 的工作。
+  // （別處直接 setDoc 的地方用 FieldValue 沒問題，那不走批次計畫。）
+  const flushBody = (store.match(/export async function flush\(\)[\s\S]*?\n\}\n/) || [''])[0];
+  check('flush 自己不組 FieldValue',
+        !/F\.increment\(|F\.arrayUnion\(/.test(flushBody),
+        '應該全部走 materialize()');
+  check('planFlush 回報 undefined 欄位而不是自己印',
+        /warnings\.push\(k\)/.test(plan) && /plan\.warnings\.forEach/.test(store));
+}
+
 // ⚠️ set(..., {merge:true}) 不會把點號當成欄位路徑（只有 update() 會）。
 // 寫 p['helped.' + uid] 會在伺服器上長出一個名字裡有點的頂層欄位，
 // 而 helped 那個 map 永遠是空的 —— 「幫過三個人」的成就因此永遠達不成。
 // 要寫巢狀就寫巢狀物件，sentinel 在任何深度都有效。
 {
   // 註解裡有把錯誤寫法當反例，掃描前要先拿掉，不然自己抓自己
-  const code = store.replace(/^\s*\/\/.*$/gm, '');
+  const code = write.replace(/^\s*\/\/.*$/gm, '');
   const dotted = [...code.matchAll(/(\w+)\[[`'"][\w.]+\.[`'"]\s*\+/g)].map(m => m[0]);
   check('沒有用點號當欄位路徑', !dotted.length, String(dotted));
-  check('helped 用巢狀物件寫', /p\.helped = \{ \.\.\.\(p\.helped \|\| \{\}\), \[/.test(store));
+  check('helped 用巢狀物件寫', /user\.helped = \{ \.\.\.\(user\.helped \|\| \{\}\), \[/.test(plan));
 
   // 計數表也是只增不減，照抄伺服器會抹掉本機還沒寫出去的
   check('helped 用 mergeCounts 合併',
@@ -300,7 +324,7 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
 {
   // 每次 flush 都整份送上去的持有清單。這些欄位在快照那邊一定要取聯集。
   const unioned = [...new Set(
-    [...store.matchAll(/p\.(\w+)\s*=\s*F\.arrayUnion\(\.\.\.me\./g)].map(m => m[1]))];
+    [...plan.matchAll(/user\.(\w+)\s*=\s*UNION\(\.\.\.me\./g)].map(m => m[1]))];
   check('讀得到整份 union 的欄位', unioned.length > 0, String(unioned));
 
   const snap = (store.match(/Object\.assign\(state\.me, \{(.*?)\n    \}\);/s) || ['',''])[1];
