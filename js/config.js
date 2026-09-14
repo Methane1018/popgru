@@ -26,6 +26,9 @@ export const firebaseConfig = {
 //  （順序是刻意的：不寫更新內容就升不了版。）
 // ----------------------------------------------------------------------------
 export const CHANGELOG = [
+  { v:'0.13.1', date:'2026-09-15', notes:[
+    '技能樹現在真的畫成一棵樹了 —— 從起點分成三條，末端在「交會」會合，走過的路是實線',
+  ]},
   { v:'0.13.0', date:'2026-09-14', notes:[
     '里程碑多了四個，一路到兩千五百萬 —— 🛸 幽浮、🌠 流星雨、🌌 銀河、🦚 極光企鵝',
     '技能樹長出「交會」：三個要兩條軸都有進度才點得起的節點',
@@ -582,56 +585,78 @@ export const SP_STEPS = [
 // buff 的 kind 跟寶物共用同一套，所以效果會自動疊加進 buffOf()。
 // grants 則是「權限」而不是數值 —— 那是後期解鎖真正的味道。
 export const SKILLS = [
-  { id:'press1',  axis:'press',  tier:1, cost:1, icon:'💪', name:'熟練',
+  { id:'press1',  axis:'press',  tier:1, row:1, col:0, cost:1, icon:'💪', name:'熟練',
     desc:'每次計分多 10% 的魚',          buff:{ kind:'fish', value:0.10 } },
-  { id:'press2',  axis:'press',  tier:2, cost:2, icon:'🪨', name:'重壓',
+  { id:'press2',  axis:'press',  tier:2, row:2, col:0, cost:2, icon:'🪨', name:'重壓',
     desc:'金魚累積速度 +25% —— 金魚是每壓固定下數就掉一條，這讓那個門檻變短',
     buff:{ kind:'gold', value:0.25 } },
-  { id:'press3',  axis:'press',  tier:3, cost:3, icon:'⚡', name:'連壓',
+  { id:'press3',  axis:'press',  tier:3, row:3, col:0, cost:3, icon:'⚡', name:'連壓',
     desc:'每次計分再多 20% 的魚',         buff:{ kind:'fish', value:0.20 } },
-  { id:'press4',  axis:'press',  tier:4, cost:5, icon:'🏗', name:'自動液壓機',
+  { id:'press4',  axis:'press',  tier:4, row:4, col:0, cost:5, icon:'🏗', name:'自動液壓機',
     desc:'開著這一頁的時候，你家的格魯會自己被壓。切到別的分頁就會停。',
     grants:'autopress' },
 
-  { id:'social1', axis:'social', tier:1, cost:1, icon:'☕', name:'熱心',
+  { id:'social1', axis:'social', tier:1, row:1, col:4, cost:1, icon:'☕', name:'熱心',
     desc:'每天幫別人的額度 +100',         buff:{ kind:'help', value:100 } },
-  { id:'social2', axis:'social', tier:2, cost:2, icon:'🎀', name:'順手禮',
+  { id:'social2', axis:'social', tier:2, row:2, col:4, cost:2, icon:'🎀', name:'順手禮',
     desc:'送人的東西便宜 15%',            buff:{ kind:'giftOff', value:0.15 } },
-  { id:'social3', axis:'social', tier:3, cost:3, icon:'🚪', name:'常客',
+  { id:'social3', axis:'social', tier:3, row:3, col:4, cost:3, icon:'🚪', name:'常客',
     desc:'每天幫別人的額度再 +200',        buff:{ kind:'help', value:200 } },
-  { id:'social4', axis:'social', tier:4, cost:5, icon:'👋', name:'魔法手',
+  { id:'social4', axis:'social', tier:4, row:4, col:4, cost:5, icon:'👋', name:'魔法手',
     desc:'每天可以在一位朋友身上留下一隻手。接下來你在自己家壓的 200 下，' +
          '會同時幫他壓一下 —— 你照常玩，順手就幫到人，而且完全不吃你的幫忙額度。',
     grants:'magichand' },
 
-  { id:'hunt1',   axis:'hunt',   tier:1, cost:1, icon:'👀', name:'眼尖',
+  { id:'hunt1',   axis:'hunt',   tier:1, row:1, col:2, cost:1, icon:'👀', name:'眼尖',
     desc:'寶物掉落機率 +30%',            buff:{ kind:'drop', value:0.30 } },
-  { id:'hunt2',   axis:'hunt',   tier:2, cost:2, icon:'📖', name:'線索',
+  { id:'hunt2',   axis:'hunt',   tier:2, row:2, col:2, cost:2, icon:'📖', name:'線索',
     desc:'圖鑑會顯示實際掉落機率，而且掉落機率 +15%',
     buff:{ kind:'drop', value:0.15 }, grants:'hintOdds' },
-  { id:'hunt3',   axis:'hunt',   tier:3, cost:3, icon:'⛏', name:'深掘',
+  { id:'hunt3',   axis:'hunt',   tier:3, row:3, col:2, cost:3, icon:'⛏', name:'深掘',
     desc:'解鎖「傳說」級寶物的掉落。沒有這個，它們永遠不會出現。',
     grants:'dropEpic' },
-  { id:'hunt4',   axis:'hunt',   tier:4, cost:5, icon:'🔆', name:'神話之眼',
+  { id:'hunt4',   axis:'hunt',   tier:4, row:4, col:2, cost:5, icon:'🔆', name:'神話之眼',
     desc:'解鎖「神話」級寶物的掉落。整個小圈子最深的地方。',
     grants:'dropMyth' },
 
   // ── 交會：needs 要兩條軸都有進度 ──
   // 刻意要求兩邊的第三層，所以最快也要 6+6+4 = 16 點才碰得到一個。
   // 它們應該長期掛在樹上當「看得到但還走不到的地方」。
-  { id:'cross1', axis:'cross', tier:5, cost:4, icon:'〽️', name:'餘震',
+  { id:'cross1', axis:'cross', tier:5, row:5, col:1, cost:4, icon:'〽️', name:'餘震',
     needs:['press3','hunt3'],
     desc:'格魯攤倒的那一下會多滾一次寶物 —— 等於兩次機會',
     grants:'aftershock' },
-  { id:'cross2', axis:'cross', tier:5, cost:4, icon:'🕵️', name:'情報網',
+  { id:'cross2', axis:'cross', tier:5, row:5, col:3, cost:4, icon:'🕵️', name:'情報網',
     needs:['social3','hunt3'],
     desc:'每幫過一個不同的人，掉落機率 +2%（最多 +20%）',
     grants:'intel' },
-  { id:'cross3', axis:'cross', tier:5, cost:4, icon:'🔗', name:'同步',
+  { id:'cross3', axis:'cross', tier:5, row:5, col:2, cost:4, icon:'🔗', name:'同步',
     needs:['press3','social3'],
     desc:'幫別人壓的時候，你自己拿到的魚變兩倍',
     grants:'syncFish' },
 ];
+
+// 技能樹畫成樹狀圖用的。
+//
+// 位置寫在每個節點的 row / col 上，**線則完全由 needs 推導出來** ——
+// 不另外維護一份邊資料，圖跟規則就不可能不一致。
+// 以後要加分支的分支、或是更多合成，就是加一個節點寫好 row/col/needs，
+// 線會自己長出來。
+export const TREE_COLS = 5;
+export const SKILL_ROOT = { id:'__root', row:0, col:2, icon:'🥚', name:'起點' };
+
+// 畫布上所有的線：[從, 到]。第一層沒有 needs，就從起點長出來。
+export const treeEdges = () => SKILLS.flatMap(sk => {
+  const from = skillNeeds(sk);
+  return (from.length ? from : [SKILL_ROOT.id]).map(f => [f, sk.id]);
+});
+
+// 某個 id 在畫布上的位置（含起點）
+export const treePos = id =>
+  id === SKILL_ROOT.id ? SKILL_ROOT : (SKILLS.find(s => s.id === id) || null);
+
+export const TREE_ROWS = () =>
+  Math.max(...SKILLS.map(s => s.row), SKILL_ROOT.row) + 1;
 
 export const skillInfo = id => SKILLS.find(s => s.id === id) || null;
 

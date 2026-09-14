@@ -449,9 +449,15 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
 // ── 技能樹 ──────────────────────────────────────────────────────────────
 {
   const block = (cfg.match(/export const SKILLS = \[(.*?)\n\];/s) || ['',''])[1];
-  const nodes = [...block.matchAll(
-    /id:'(\w+)',\s*axis:'(\w+)',\s*tier:(\d+),\s*cost:(\d+)/g)]
-    .map(m => ({ id:m[1], axis:m[2], tier:+m[3], cost:+m[4] }));
+  // 逐段解析而不是一條長正規表示式 —— 欄位順序一改，長正規表示式就會
+  // 靜靜地match 不到任何東西，然後下游的檢查全部變成「0 筆資料都通過」。
+  // （加 row/col 的時候就踩到了：假通過。）
+  const num = (b, k) => { const m = b.match(new RegExp(k + ':\\s*(\\d+)')); return m ? +m[1] : undefined; };
+  const nodes = block.split(/(?=\{ id:')/).filter(b => /axis:'/.test(b)).map(b => ({
+    id:   (b.match(/id:'(\w+)'/) || [])[1],
+    axis: (b.match(/axis:'(\w+)'/) || [])[1],
+    tier: num(b, 'tier'), row: num(b, 'row'), col: num(b, 'col'), cost: num(b, 'cost'),
+  }));
 
   check('讀得到技能節點', nodes.length > 0, String(nodes.length));
 
@@ -500,6 +506,35 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   const missing = chains.filter(a => !new RegExp('\\b' + a + ':').test(axDef));
   check('每條主軸都有 AXES 定義', !missing.length, String(missing));
   check('交會有自己的定義', /export const CROSS = \{/.test(cfg));
+
+  // ── 樹狀圖 ──
+  // 線是從 needs 推導出來的，所以圖不可能跟規則不一致。
+  // 但位置要人寫，所以位置本身要檢查：不能缺、不能疊、不能往回長。
+  {
+    const withPos = nodes.filter(n => n.row !== undefined && n.col !== undefined);
+    check('每個技能都有畫布座標', withPos.length === nodes.length,
+          `少了 ${nodes.filter(n => n.row === undefined).map(n => n.id)}`);
+    const cells = withPos.map(n => `${n.row},${n.col}`);
+    const dup = cells.filter((c, i) => cells.indexOf(c) !== i);
+    check('沒有兩個技能疊在同一格', !dup.length, String([...new Set(dup)]));
+    const cols = +(cfg.match(/export const TREE_COLS = (\d+)/) || [])[1];
+    const over = withPos.filter(n => n.col >= cols || n.col < 0);
+    check('座標沒有超出畫布', !over.length, `${over.map(n => n.id)} 超過 ${cols} 欄`);
+    // 前置一定要在自己上面，不然線會往回長，看起來像迴圈
+    const byId = Object.fromEntries(withPos.map(n => [n.id, n]));
+    const back = [];
+    for (const b of (cfg.match(/export const SKILLS = \[(.*?)\n\];/s) || ['',''])[1]
+                    .split(/(?=\{ id:')/)) {
+      const id = (b.match(/id:'(\w+)'/) || [])[1];
+      if (!byId[id]) continue;
+      for (const nd of [...b.matchAll(/'(\w+)'/g)].map(m => m[1])) {
+        if (byId[nd] && nd !== id && byId[nd].row >= byId[id].row) back.push(`${nd}→${id}`);
+      }
+    }
+    check('前置都在自己上面一列', !back.length, String(back));
+    check('線是從 needs 推導的', /export const treeEdges = \(\) => SKILLS\.flatMap/.test(cfg));
+    check('有起點', /export const SKILL_ROOT = \{/.test(cfg));
+  }
 
   // ── 交會節點 ──
   // 它們的價值在於「要兩條不同的軸都有進度」。前置寫錯的話，

@@ -1,14 +1,15 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.13.0';
+import * as S from './store.js?v=0.13.1';
 import {
   TUNING, ITEMS, MILESTONES, HATS, clampQty,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
   TREASURES, RARITY, SOURCE_LABEL, EGG_TAG, tagOf, treasureHow,
   SKILLS, AXES, CROSS, SP_STEPS, skillNeeds,
-} from './config.js?v=0.13.0';
+  TREE_COLS, TREE_ROWS, SKILL_ROOT, treeEdges, treePos,
+} from './config.js?v=0.13.1';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -904,6 +905,51 @@ function skillNode(sk, color) {
   return n;
 }
 
+// 把技能樹畫成真的樹。
+//
+// 節點位置來自每個技能的 row / col，**線完全由 needs 推導**（treeEdges）——
+// 所以圖永遠等於規則，不可能畫出一條實際上不存在的前置關係。
+// 以後要加分支的分支或更多合成，加節點就好，線會自己長出來。
+//
+// 線用 SVG 疊在格線上，viewBox 直接對應「幾欄幾列」，
+// 所以座標是算出來的，不需要去量 DOM —— 面板還在動畫中也不會畫歪。
+function drawTree() {
+  const rows = TREE_ROWS(), cols = TREE_COLS;
+  const wrap = el('div', 'sk-tree');
+  wrap.style.setProperty('--cols', cols);
+  wrap.style.setProperty('--rows', rows);
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${cols} ${rows}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.classList.add('sk-edges');
+  for (const [from, to] of treeEdges()) {
+    const a = treePos(from), b = treePos(to);
+    if (!a || !b) continue;
+    const gotA = from === SKILL_ROOT.id || S.hasSkill(from);
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', a.col + 0.5); line.setAttribute('y1', a.row + 0.5);
+    line.setAttribute('x2', b.col + 0.5); line.setAttribute('y2', b.row + 0.5);
+    // 走得通的路才畫實線 —— 一眼看得出自己走到哪了
+    line.classList.add(S.hasSkill(to) ? 'on' : gotA ? 'open' : 'off');
+    svg.append(line);
+  }
+  wrap.append(svg);
+
+  const root = el('div', 'sk-node root');
+  root.style.gridArea = `${SKILL_ROOT.row + 1} / ${SKILL_ROOT.col + 1}`;
+  root.append(el('div', 'sk-icon', SKILL_ROOT.icon));
+  root.append(el('div', 'sk-name', SKILL_ROOT.name));
+  wrap.append(root);
+
+  for (const sk of SKILLS) {
+    const n = skillNode(sk, (AXES[sk.axis] || CROSS).color);
+    n.style.gridArea = `${sk.row + 1} / ${sk.col + 1}`;
+    wrap.append(n);
+  }
+  return wrap;
+}
+
 function panelSkills(body) {
   if (skillDetail) {
     const sk = SKILLS.find(x => x.id === skillDetail);
@@ -934,44 +980,16 @@ function panelSkills(body) {
   box.append(swap);
   body.append(box);
 
-  for (const [key, ax] of Object.entries(AXES)) {
-    const wrap = el('div', 'sk-axis');
-    const head = el('div', 'sk-head');
-    const name = el('b', null, `${ax.icon} ${ax.name}`);
-    name.style.color = ax.color;
-    head.append(name, el('span', 'sk-blurb', ax.blurb));
-    wrap.append(head);
-
-    const path = el('div', 'sk-path');
-    for (const sk of SKILLS.filter(x => x.axis === key).sort((a, b) => a.tier - b.tier)) {
-      path.append(skillNode(sk, ax.color));
-    }
-    wrap.append(path);
-    body.append(wrap);
+  // 圖例。樹上沒有地方寫軸名，所以顏色的意思要先講清楚。
+  const legend = el('div', 'sk-legend');
+  for (const ax of [...Object.values(AXES), CROSS]) {
+    const t = el('span', 'sk-leg');
+    const dot = el('i'); dot.style.background = ax.color;
+    t.append(dot, `${ax.icon} ${ax.name}`);
+    legend.append(t);
   }
-
-  // ── 交會 ──
-  // 三條軸的末端會合的地方。要兩條軸都有進度才點得起，所以它會在樹上
-  // 掛很久 —— 那個「看得到但還走不到」正是整個技能樹的重點。
-  const cross = SKILLS.filter(s => s.axis === 'cross');
-  if (cross.length) {
-    const wrap = el('div', 'sk-axis sk-cross');
-    const head = el('div', 'sk-head');
-    const name = el('b', null, `${CROSS.icon} ${CROSS.name}`);
-    name.style.color = CROSS.color;
-    head.append(name, el('span', 'sk-blurb', CROSS.blurb));
-    wrap.append(head);
-    const path = el('div', 'sk-path sk-path-3');
-    for (const sk of cross) {
-      const n = skillNode(sk, CROSS.color);
-      // 交會節點要寫清楚它要兩邊什麼，不然玩家看不出為什麼點不起來
-      n.append(el('div', 'sk-need',
-        skillNeeds(sk).map(id => SKILLS.find(s => s.id === id).name).join(' ＋ ')));
-      path.append(n);
-    }
-    wrap.append(path);
-    body.append(wrap);
-  }
+  body.append(legend);
+  body.append(drawTree());
 
   body.append(el('p', 'note', '學會之後不能重來。要走哪條路是一個真的選擇。'));
 }

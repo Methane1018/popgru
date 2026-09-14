@@ -286,13 +286,30 @@
   .sk-head{display:flex; align-items:baseline; gap:6px; margin-bottom:6px; flex-wrap:wrap}
   .sk-head b{font-size:14.5px}
   .sk-head .sk-blurb{font-size:11.5px; color:var(--muted)}
-  .sk-path{display:grid; grid-template-columns:repeat(4,1fr); gap:5px}
-  .sk-path-3{grid-template-columns:repeat(3,1fr)}
-  /* 交會是三條軸會合的地方，用一條線把它跟上面隔開 */
-  .sk-cross{margin-top:16px; padding-top:14px; border-top:1px dashed var(--line)}
-  .sk-cross .sk-node + .sk-node::before{display:none}   /* 它們之間不是一條鏈 */
-  .sk-need{font-size:9.5px; color:var(--muted); line-height:1.25; margin-top:3px;
-           white-space:normal}
+  /* ── 技能樹 ──
+     節點放在格子上，線用 SVG 疊在同一塊區域。
+     viewBox 對應「幾欄幾列」，preserveAspectRatio:none 讓它跟著格線拉伸，
+     所以線的兩端永遠落在格子正中心，不用量 DOM。 */
+  /* gap 必須是 0：SVG 的座標假設「一格 = 寬度÷欄數」，有間隙就對不準
+     （量到過 2.4px 的偏移）。間距改用節點自己的 margin，
+     節點仍然置中於格子，所以中心永遠對齊。 */
+  .sk-tree{position:relative; display:grid; gap:0; margin:6px 0 4px;
+           grid-template-columns:repeat(var(--cols),1fr);
+           grid-auto-rows:74px}
+  .sk-edges{position:absolute; inset:0; width:100%; height:100%;
+            pointer-events:none; overflow:visible}
+  .sk-edges line{stroke-width:.045; stroke-linecap:round; vector-effect:non-scaling-stroke}
+  .sk-edges line.off {stroke:var(--line);   stroke-width:1.5px}
+  .sk-edges line.open{stroke:var(--accent); stroke-width:1.5px; opacity:.45; stroke-dasharray:4 4}
+  .sk-edges line.on  {stroke:var(--accent); stroke-width:2.5px}
+  .sk-tree .sk-node{position:relative; z-index:1; padding:6px 3px; margin:3px}
+  .sk-tree .sk-node + .sk-node::before{display:none}   /* 連線改由 SVG 畫 */
+  .sk-legend{display:flex; flex-wrap:wrap; gap:4px 12px; margin:8px 2px 2px}
+  .sk-leg{display:inline-flex; align-items:center; gap:5px; font-size:11.5px;
+          font-weight:700; color:var(--muted)}
+  .sk-leg i{width:9px; height:9px; border-radius:99px; display:inline-block}
+  .sk-node.root{cursor:default; border-style:dashed; background:none}
+  .sk-node.root:hover{border-color:var(--line)}
   .sk-node{border:1px solid var(--line); border-radius:12px; padding:8px 4px; text-align:center;
            background:var(--card); cursor:pointer; position:relative}
   /* 用細線把同一條軸串起來，看得出是一條路而不是四個獨立的東西 */
@@ -453,6 +470,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=0.13.0"></script>
+<script type="module" src="js/app.js?v=0.13.1"></script>
 </body>
 </html>

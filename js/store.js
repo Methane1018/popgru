@@ -10,12 +10,12 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillNeeds,
-} from './config.js?v=0.13.0';
+} from './config.js?v=0.13.1';
 import {
   planFlush, planSnapshot, isInc, isUnion, isNow,
   NO_NAME, realName, mergeOwned, mergeCounts, readHelped,
   pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS,
-} from './plan.js?v=0.13.0';
+} from './plan.js?v=0.13.1';
 // 這幾個是純決策，定義在 plan.js；這裡轉出去讓呼叫端和測試照舊拿得到
 export { mergeOwned, mergeCounts, readHelped, pickMirror };
 
