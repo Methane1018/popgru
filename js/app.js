@@ -1,14 +1,14 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.12.1';
+import * as S from './store.js?v=0.13.0';
 import {
   TUNING, ITEMS, MILESTONES, HATS, clampQty,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
   SKINS, SKIN_KINDS, skinInfo, defaultSkin,
   TREASURES, RARITY, SOURCE_LABEL, EGG_TAG, tagOf, treasureHow,
-  SKILLS, AXES, SP_STEPS, skillPrereq,
-} from './config.js?v=0.12.1';
+  SKILLS, AXES, CROSS, SP_STEPS, skillNeeds,
+} from './config.js?v=0.13.0';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -883,6 +883,27 @@ const nextSpAt = () => {
     .filter(x => x > n).sort((a, b) => a - b)[0] || null;
 };
 
+// 一個技能節點。四種狀態要分得出來 —— 少了 near，「前置還沒學」
+// 跟「只是點數不夠」會灰成同一個樣子，看不出哪一個才是眼前那個目標。
+function skillNode(sk, color) {
+  const got = S.hasSkill(sk.id), ready = S.canLearn(sk.id);
+  const near = !got && !ready && skillNeeds(sk).every(x => S.hasSkill(x));  // 路通了，只差點數
+  const n = el('div', 'sk-node ' + (got ? 'got' : ready ? 'ready' : near ? 'near' : 'locked'));
+  if (got) n.style.borderColor = color;
+  // 學不起的也照樣顯示圖示和名字，只是灰掉 ——
+  // 藏起來就沒有「我想要那個」的感覺了
+  n.append(el('div', 'sk-icon', sk.icon));
+  n.append(el('div', 'sk-name', sk.name));
+  n.append(el('div', 'sk-cost',
+    got ? '已學會' : near ? `差 ${sk.cost - S.spLeft()} 點` : `${sk.cost} 點`));
+  n.tabIndex = 0;
+  n.setAttribute('role', 'button');
+  const open = () => { skillDetail = sk.id; subView = true; renderPanel('skills'); };
+  n.onclick = open;
+  n.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+  return n;
+}
+
 function panelSkills(body) {
   if (skillDetail) {
     const sk = SKILLS.find(x => x.id === skillDetail);
@@ -923,23 +944,29 @@ function panelSkills(body) {
 
     const path = el('div', 'sk-path');
     for (const sk of SKILLS.filter(x => x.axis === key).sort((a, b) => a.tier - b.tier)) {
-      // 四種狀態要分得出來。少了 near，「前置還沒學」跟「只是點數不夠」
-      // 會灰成同一個樣子，看不出哪一個才是眼前那個目標。
-      const got = S.hasSkill(sk.id), ready = S.canLearn(sk.id);
-      const pre = skillPrereq(sk);
-      const near = !got && !ready && (!pre || S.hasSkill(pre));   // 路通了，只差點數
-      const n = el('div', 'sk-node ' + (got ? 'got' : ready ? 'ready' : near ? 'near' : 'locked'));
-      if (got) n.style.borderColor = ax.color;
-      // 學不起的也照樣顯示圖示和名字，只是灰掉 ——
-      // 藏起來就沒有「我想要那個」的感覺了
-      n.append(el('div', 'sk-icon', sk.icon));
-      n.append(el('div', 'sk-name', sk.name));
-      n.append(el('div', 'sk-cost', got ? '已學會' : near ? `差 ${sk.cost - S.spLeft()} 點` : `${sk.cost} 點`));
-      n.tabIndex = 0;
-      n.setAttribute('role', 'button');
-      const open = () => { skillDetail = sk.id; subView = true; renderPanel('skills'); };
-      n.onclick = open;
-      n.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+      path.append(skillNode(sk, ax.color));
+    }
+    wrap.append(path);
+    body.append(wrap);
+  }
+
+  // ── 交會 ──
+  // 三條軸的末端會合的地方。要兩條軸都有進度才點得起，所以它會在樹上
+  // 掛很久 —— 那個「看得到但還走不到」正是整個技能樹的重點。
+  const cross = SKILLS.filter(s => s.axis === 'cross');
+  if (cross.length) {
+    const wrap = el('div', 'sk-axis sk-cross');
+    const head = el('div', 'sk-head');
+    const name = el('b', null, `${CROSS.icon} ${CROSS.name}`);
+    name.style.color = CROSS.color;
+    head.append(name, el('span', 'sk-blurb', CROSS.blurb));
+    wrap.append(head);
+    const path = el('div', 'sk-path sk-path-3');
+    for (const sk of cross) {
+      const n = skillNode(sk, CROSS.color);
+      // 交會節點要寫清楚它要兩邊什麼，不然玩家看不出為什麼點不起來
+      n.append(el('div', 'sk-need',
+        skillNeeds(sk).map(id => SKILLS.find(s => s.id === id).name).join(' ＋ ')));
       path.append(n);
     }
     wrap.append(path);
@@ -987,7 +1014,7 @@ function showSpBuy() {
 }
 
 function skillDetailView(body, sk) {
-  const ax = AXES[sk.axis], got = S.hasSkill(sk.id), why = S.skillBlock(sk.id);
+  const ax = AXES[sk.axis] || CROSS, got = S.hasSkill(sk.id), why = S.skillBlock(sk.id);
 
   const back = el('button', 'btn', '← 回技能');
   back.onclick = () => { skillDetail = null; subView = false; renderPanel('skills'); };
@@ -999,9 +1026,21 @@ function skillDetailView(body, sk) {
   const tags = el('div', 'dex-detail-tags');
   const a = el('span', 'dex-rar', `${ax.icon} ${ax.name}`);
   a.style.background = ax.color;
-  tags.append(a, el('span', 'dex-rar src', `第 ${sk.tier} 層 · ${sk.cost} 點`));
+  tags.append(a, el('span', 'dex-rar src',
+    sk.axis === 'cross' ? `${sk.cost} 點` : `第 ${sk.tier} 層 · ${sk.cost} 點`));
   head.append(tags);
   body.append(head);
+
+  const needs = skillNeeds(sk);
+  if (needs.length) {
+    body.append(el('p', 'note', '前置'));
+    const line = el('p', 'dex-line');
+    line.textContent = needs.map(id => {
+      const t = SKILLS.find(s => s.id === id);
+      return `${S.hasSkill(id) ? '✓' : '✗'} ${t.icon} ${t.name}`;
+    }).join('　');
+    body.append(line);
+  }
 
   body.append(el('p', 'note', '效果'));
   body.append(el('p', 'dex-line', sk.desc));

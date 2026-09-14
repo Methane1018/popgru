@@ -9,13 +9,13 @@ import {
   firebaseConfig, FIREBASE_VERSION, TUNING, ITEMS,
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
-  SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillPrereq,
-} from './config.js?v=0.12.1';
+  SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillNeeds,
+} from './config.js?v=0.13.0';
 import {
   planFlush, planSnapshot, isInc, isUnion, isNow,
   NO_NAME, realName, mergeOwned, mergeCounts, readHelped,
   pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS,
-} from './plan.js?v=0.12.1';
+} from './plan.js?v=0.13.0';
 // 這幾個是純決策，定義在 plan.js；這裡轉出去讓呼叫端和測試照舊拿得到
 export { mergeOwned, mergeCounts, readHelped, pickMirror };
 
@@ -581,6 +581,8 @@ export function squash() {
   const mult = me.double > 0 ? 2 : 1;
   if (me.double > 0) me.double -= 1;
   r.gained = TUNING.fishPerSquash * mult;
+  // 🔗 同步：幫別人壓的時候自己拿雙倍。交會節點，吃壓製和社交兩邊的投資。
+  if (!v.isMine && grants('syncFish')) r.gained *= 2;
 
   const bonus = cosmeticBonus() + buffOf('fish');   // 裝扮持有量 ＋ 寶物增益
   if (bonus > 0) {
@@ -615,6 +617,12 @@ export function squash() {
 
   const drop = rollTreasure(r.flat ? TUNING.flatDropBoost : 1);   // 攤的那一下特別容易掉寶
   if (drop && unlockTreasure(drop.id)) r.treasure = drop;
+
+  // 〽️ 餘震：攤倒那一下多滾一次，等於兩次機會
+  if (r.flat && grants('aftershock')) {
+    const again = rollTreasure(TUNING.flatDropBoost);
+    if (again && unlockTreasure(again.id)) r.treasure2 = again;
+  }
 
   if (!v.isMine && v.uid) {                          // 記下幫過誰，成就要用
     me.helped = { ...me.helped, [v.uid]: (me.helped[v.uid] || 0) + 1 };
@@ -947,6 +955,12 @@ export const helpedCount = () => Object.keys(state.me.helped || {}).length;
 export const globalNow = () =>
   state.global.squashes + state.pending + inflight.n;
 
+// 🕵️ 情報網：每幫過一個不同的人，掉落機率 +2%，最多 +20%。
+// 這是交會節點，所以它同時吃社交和探寶兩邊的投資 —— 數值本身不大，
+// 重點是它讓「常去幫別人」這件事對探寶有意義。
+export const intelBonus = () =>
+  grants('intel') ? Math.min(0.20, helpedCount() * 0.02) : 0;
+
 // 攤一次平均要幾下。跟金魚一樣用除法，增益再多也不會退化成「每下都攤」。
 export const flatOdds = () =>
   Math.max(1, Math.round(TUNING.flatOdds / (1 + Math.max(0, buffOf('flat')))));
@@ -991,8 +1005,11 @@ export function skillBlock(id) {
   const sk = skillInfo(id);
   if (!sk) return '沒有這個技能';
   if (hasSkill(id)) return '已經學會了';
-  const pre = skillPrereq(sk);
-  if (pre && !hasSkill(pre)) return `要先學「${skillInfo(pre).name}」`;
+  // 交會節點會有兩個前置（分別在兩條軸上），所以要全部列出來
+  const missing = skillNeeds(sk).filter(x => !hasSkill(x));
+  if (missing.length) {
+    return `要先學${missing.map(x => `「${skillInfo(x).name}」`).join('和')}`;
+  }
   const short = sk.cost - spLeft();
   if (short > 0) return `技能點不夠，還差 ${short} 點`;
   return null;
@@ -1059,13 +1076,23 @@ export function buySkillPoint(qty = 1) {
 export function repairSkills() {
   const have = new Set(state.me.skills || []);
   let added = 0;
-  for (const id of [...have]) {
-    const sk = skillInfo(id);
-    if (!sk) continue;
-    for (const lower of SKILLS.filter(s => s.axis === sk.axis && s.tier < sk.tier)) {
-      if (!have.has(lower.id)) { have.add(lower.id); added++; }
+  // 反覆補到不再增加為止 —— 交會節點的前置自己也有前置
+  for (let pass = 0; pass < SKILLS.length; pass++) {
+    const before = have.size;
+    for (const id of [...have]) {
+      const sk = skillInfo(id);
+      if (!sk) continue;
+      for (const need of skillNeeds(sk)) if (!have.has(need)) have.add(need);
+      // 一般節點：同一軸比它低的層全部補上
+      if (sk.axis !== 'cross') {
+        for (const lower of SKILLS.filter(s => s.axis === sk.axis && s.tier < sk.tier)) {
+          have.add(lower.id);
+        }
+      }
     }
+    if (have.size === before) break;
   }
+  added = have.size - (state.me.skills || []).length;
   if (!added) return 0;
   state.me.skills = [...have];
   console.warn(`POPGRU 補回 ${added} 個被寫入問題弄丟的技能`);
@@ -1160,7 +1187,7 @@ export function checkAchievements() {
 
 // 掉落。稀有的先擲，才不會被常見的蓋過去。
 function rollTreasure(boost = 1) {
-  const mult = (1 + buffOf('drop')) * boost;
+  const mult = (1 + buffOf('drop') + intelBonus()) * boost;
   const pool = TREASURES
     .filter(t => t.source === 'drop' && !hasTreasure(t.id))
     // 傳說與神話要先在探寶軸點出權限，沒點就根本不在池子裡。

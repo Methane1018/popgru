@@ -156,19 +156,38 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   check('每個版本都有寫更新內容', allHaveNotes);
 }
 
-// 6) 帽子的解鎖門檻要對得上里程碑，不然進度條寫的解鎖品項是騙人的
+// 6) 進度條上寫的「解鎖 ○○」必須是真的，而且真的在那個數字解鎖。
+//    本來這條是「帽子門檻要一字不差對齊里程碑」，那逼得每個里程碑都只能送帽子。
+//    改成「每個里程碑都要真的解鎖某樣東西，而且名字要對得上」——
+//    這樣後面的里程碑可以送背景、送顏色，而騙人的文案一樣會被抓到。
 {
-  const ms = [...cfg.matchAll(/\{ at:\s*(\d+)/g)].map(m => +m[1]);
-  // 只看 HATS 那一段，別把 SKINS 的 need 也算進來
-  const hatsBlock = (cfg.match(/export const HATS = \[(.*?)\];/s) || ['', ''])[1];
-  const needs = [...hatsBlock.matchAll(/need:\s*(\d+)/g)].map(m => +m[1]).filter(n => n > 0);
-  check('帽子門檻對齊里程碑', JSON.stringify(needs) === JSON.stringify(ms),
-        `帽子=${needs} 里程碑=${ms}`);
+  const msBlock = (cfg.match(/export const MILESTONES = \[(.*?)\];/s) || ['', ''])[1];
+  const milestones = [...msBlock.matchAll(/\{ at:\s*(\d+),\s*label:\s*'([^']*)',\s*unlock:\s*'([^']*)'/g)]
+    .map(m => ({ at: +m[1], label: m[2], unlock: m[3] }));
+  const ms = milestones.map(m => m.at);
+  check('讀得到里程碑', milestones.length > 0, String(milestones.length));
+  check('里程碑由小到大排好', ms.every((v, i) => i === 0 || v > ms[i-1]), String(ms));
 
-  // 外觀的門檻也必須是里程碑上真的存在的數字，不然玩家永遠解不開
+  const hatsBlock  = (cfg.match(/export const HATS = \[(.*?)\];/s) || ['', ''])[1];
   const skinsBlock = (cfg.match(/export const SKINS = \{(.*?)\n\};/s) || ['', ''])[1];
-  const sNeeds = [...skinsBlock.matchAll(/need:\s*(\d+)/g)].map(m => +m[1]).filter(n => n > 0);
-  const bad = [...new Set(sNeeds)].filter(n => !ms.includes(n));
+  // 哪個門檻會解鎖哪些東西（帽子和其他外觀一起算）
+  const unlockAt = {};
+  for (const blk of [hatsBlock, skinsBlock]) {
+    for (const line of blk.split('\n')) {
+      const need = /need:\s*(\d+)/.exec(line), name = /name:\s*'([^']*)'/.exec(line);
+      if (need && name && +need[1] > 0) (unlockAt[+need[1]] ||= []).push(name[1]);
+    }
+  }
+  const empty = milestones.filter(m => !unlockAt[m.at]);
+  check('每個里程碑都真的解鎖一樣東西', !empty.length,
+        `這些里程碑沒有對應的外觀：${empty.map(m => m.at)}`);
+  const lying = milestones.filter(m => unlockAt[m.at]
+    && !unlockAt[m.at].some(n => m.unlock.includes(n)));
+  check('進度條寫的解鎖品項是真的', !lying.length,
+        lying.map(m => `${m.at} 寫「${m.unlock}」但那裡解鎖的是 ${unlockAt[m.at]}`).join('；'));
+
+  // 反過來：外觀的門檻也必須是里程碑上真的存在的數字，不然玩家永遠解不開
+  const bad = Object.keys(unlockAt).map(Number).filter(n => !ms.includes(n));
   check('外觀門檻都落在里程碑上', !bad.length, `這些數字不是里程碑：${bad}`);
 
   // 每一類外觀都要有一款預設（cost 0），否則新玩家沒東西可用
@@ -463,21 +482,42 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   check('稀有度的門檻都有技能解得開',
         needs.every(n => granted.includes(n)), String(needs.filter(n => !granted.includes(n))));
 
+  // 交會節點不是一條鏈，下面幾條只看三條主軸
+  const chains = [...new Set(nodes.map(n => n.axis))].filter(a => a !== 'cross');
+
   // 每軸的層級要是連續的 1..N，中間缺一層就會永遠卡住點不下去
-  const axes = [...new Set(nodes.map(n => n.axis))];
-  for (const a of axes) {
+  for (const a of chains) {
     const t = nodes.filter(n => n.axis === a).map(n => n.tier).sort((x,y) => x-y);
     check(`技能軸 ${a} 的層級連續`, t.every((v,i) => v === i+1), t.join(','));
   }
 
   // 三條軸花費相同，才不會有哪一條先天划算
-  const costs = axes.map(a => nodes.filter(n => n.axis === a).reduce((s,n) => s+n.cost, 0));
-  check('每條軸的總花費相同', new Set(costs).size === 1, costs.join('/'));
+  const costs = chains.map(a => nodes.filter(n => n.axis === a).reduce((s,n) => s+n.cost, 0));
+  check('三條主軸花費相同', new Set(costs).size === 1, costs.join('/'));
 
-  // 每個軸都要在 AXES 裡有定義（名稱、顏色、說明），否則面板會畫出 undefined
+  // 每個軸都要有定義（名稱、顏色、說明），否則面板會畫出 undefined
   const axDef = (cfg.match(/export const AXES = \{(.*?)\n\};/s) || ['',''])[1];
-  const missing = axes.filter(a => !new RegExp('\\b' + a + ':').test(axDef));
-  check('每條軸都有 AXES 定義', !missing.length, String(missing));
+  const missing = chains.filter(a => !new RegExp('\\b' + a + ':').test(axDef));
+  check('每條主軸都有 AXES 定義', !missing.length, String(missing));
+  check('交會有自己的定義', /export const CROSS = \{/.test(cfg));
+
+  // ── 交會節點 ──
+  // 它們的價值在於「要兩條不同的軸都有進度」。前置寫錯的話，
+  // 它要嘛變成一般節點（少一個前置），要嘛永遠點不起來（前置 id 打錯）。
+  {
+    const blk = (cfg.match(/export const SKILLS = \[(.*?)\n\];/s) || ['',''])[1];
+    const ids = nodes.map(n => n.id);
+    const crossBlocks = blk.split(/(?=\{ id:')/).filter(b => /axis:'cross'/.test(b));
+    check('讀得到交會節點', crossBlocks.length > 0, String(crossBlocks.length));
+    for (const b of crossBlocks) {
+      const id = (b.match(/id:'(\w+)'/) || [])[1];
+      const needs = [...b.matchAll(/'(\w+)'/g)].map(m => m[1])
+        .filter(x => ids.includes(x) && x !== id);
+      check(`交會 ${id} 要兩個前置`, needs.length === 2, needs.join(','));
+      const axesOf = [...new Set(needs.map(n => nodes.find(x => x.id === n).axis))];
+      check(`交會 ${id} 的前置來自不同軸`, axesOf.length === 2, axesOf.join(','));
+    }
+  }
 
   // 「壓出來的」技能點不該夠點滿整棵樹 —— 要走哪條路必須是一個真的選擇。
   // （金魚換點是後期的加速閥，刻意不算在這條裡面。）

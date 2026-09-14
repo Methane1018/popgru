@@ -287,6 +287,12 @@
   .sk-head b{font-size:14.5px}
   .sk-head .sk-blurb{font-size:11.5px; color:var(--muted)}
   .sk-path{display:grid; grid-template-columns:repeat(4,1fr); gap:5px}
+  .sk-path-3{grid-template-columns:repeat(3,1fr)}
+  /* 交會是三條軸會合的地方，用一條線把它跟上面隔開 */
+  .sk-cross{margin-top:16px; padding-top:14px; border-top:1px dashed var(--line)}
+  .sk-cross .sk-node + .sk-node::before{display:none}   /* 它們之間不是一條鏈 */
+  .sk-need{font-size:9.5px; color:var(--muted); line-height:1.25; margin-top:3px;
+           white-space:normal}
   .sk-node{border:1px solid var(--line); border-radius:12px; padding:8px 4px; text-align:center;
            background:var(--card); cursor:pointer; position:relative}
   /* 用細線把同一條軸串起來，看得出是一條路而不是四個獨立的東西 */
@@ -447,6 +453,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=0.12.1"></script>
+<script type="module" src="js/app.js?v=0.13.0"></script>
 </body>
 </html>

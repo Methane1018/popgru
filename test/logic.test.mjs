@@ -1098,5 +1098,81 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   }
 }
 
+/* ==================== 交會節點（v0.13.0） ====================
+   技能樹從三條平行線變成一棵樹。真正增加深度的不是「單一起點」，
+   是這三個要兩條軸都有進度才點得起的節點。                          */
+{
+  const { SKILLS: SK, skillNeeds, skillInfo } = await import('../js/config.js');
+  const cross = SK.filter(s => s.axis === 'cross');
+
+  ok('★ 有三個交會節點', cross.length === 3, String(cross.length));
+  ok('★ 每個都要兩個前置', cross.every(s => skillNeeds(s).length === 2));
+  ok('★ 前置來自不同的軸', cross.every(s =>
+     new Set(skillNeeds(s).map(id => skillInfo(id).axis)).size === 2));
+  ok('一般節點的前置是同軸前一層',
+     skillNeeds(skillInfo('press3'))[0] === 'press2');
+  ok('第一層沒有前置', skillNeeds(skillInfo('press1')).length === 0);
+
+  // 兩邊都要有，缺一個都不行
+  S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 10 ** 9;
+  ok('★ 什麼都沒有時點不起交會', !S.canLearn('cross1'));
+  S.state.me.skills = ['press1','press2','press3'];
+  ok('★ 只有一邊還是點不起', !S.canLearn('cross1'), S.skillBlock('cross1'));
+  ok('★ 而且說得出還缺哪一個',
+     S.skillBlock('cross1').includes('深掘') && !S.skillBlock('cross1').includes('連壓'),
+     S.skillBlock('cross1'));
+  S.state.me.skills = ['press1','press2','press3','hunt1','hunt2','hunt3'];
+  ok('★ 兩邊都有就點得起', S.canLearn('cross1'), S.skillBlock('cross1'));
+
+  // 兩個都缺的時候要一次列出來
+  S.state.me.skills = [];
+  ok('★ 兩個都缺會一起講',
+     S.skillBlock('cross1').includes('連壓') && S.skillBlock('cross1').includes('深掘'),
+     S.skillBlock('cross1'));
+
+  // 修補：只剩交會節點的話，兩條軸都要補回來
+  S.state.me.skills = ['cross1'];
+  S.repairSkills();
+  ok('★ 補得回交會的兩條前置鏈',
+     ['press1','press2','press3','hunt1','hunt2','hunt3'].every(x => S.hasSkill(x)),
+     S.state.me.skills.sort().join(','));
+  ok('★ 不會補到不相干的軸',
+     !S.state.me.skills.some(x => x.startsWith('social')), S.state.me.skills.join(','));
+
+  // 🕵️ 情報網：幫過的人越多，掉落越好
+  S.state.me.skills = []; S.state.me.helped = {};
+  ok('沒點就沒有加成', S.intelBonus() === 0);
+  S.state.me.skills = ['cross2']; S.state.me.helped = { a:1, b:1, c:1 };
+  ok('★ 幫過三個人 → +6%', Math.abs(S.intelBonus() - 0.06) < 1e-9, String(S.intelBonus()));
+  S.state.me.helped = Object.fromEntries([...Array(50)].map((_, i) => ['u' + i, 1]));
+  ok('★ 有上限 +20%', Math.abs(S.intelBonus() - 0.20) < 1e-9, String(S.intelBonus()));
+  S.state.me.helped = {};
+
+  // 🔗 同步：幫別人壓的時候自己拿雙倍
+  S.state.me.skills = []; S.state.me.treasures = []; setRandom(1);
+  S.state.viewing = { uid:'fr', name:'x', ownerName:'x', squashes:0, isMine:false, skin:{} };
+  TUNING.helpCap = 0;
+  const plain = S.squash().gained;
+  S.state.me.skills = ['cross3'];
+  ok('★ 幫別人壓拿雙倍', S.squash().gained === plain * 2, String(S.squash().gained));
+  S.state.viewing = { ...S.state.myGru, isMine:true };
+  ok('★ 在自己家不會雙倍', S.squash().gained === plain, String(S.squash().gained));
+
+  // 〽️ 餘震：攤倒那一下多滾一次
+  S.state.me.skills = []; S.state.me.treasures = [];
+  setRandom(0);                                   // 一定攤、一定掉
+  const one = S.squash();
+  ok('攤了會掉一個', !!one.treasure && !one.treasure2, JSON.stringify(!!one.treasure2));
+  S.state.me.treasures = []; S.state.me.skills = ['cross1'];
+  const two = S.squash();
+  ok('★ 點了餘震會掉兩個', !!two.treasure && !!two.treasure2,
+     `${two.treasure && two.treasure.name} / ${two.treasure2 && two.treasure2.name}`);
+  ok('★ 兩個不會是同一個', !two.treasure2 || two.treasure.id !== two.treasure2.id);
+
+  setRandom(1); TUNING.helpCap = 300;
+  S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
+  S.state.me.helped = {};
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

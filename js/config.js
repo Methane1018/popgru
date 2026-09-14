@@ -26,6 +26,13 @@ export const firebaseConfig = {
 //  （順序是刻意的：不寫更新內容就升不了版。）
 // ----------------------------------------------------------------------------
 export const CHANGELOG = [
+  { v:'0.13.0', date:'2026-09-14', notes:[
+    '里程碑多了四個，一路到兩千五百萬 —— 🛸 幽浮、🌠 流星雨、🌌 銀河、🦚 極光企鵝',
+    '技能樹長出「交會」：三個要兩條軸都有進度才點得起的節點',
+    '〽️ 餘震：格魯攤倒那一下會多滾一次寶物',
+    '🕵️ 情報網：每幫過一個不同的人，掉落機率 +2%（最多 +20%）',
+    '🔗 同步：幫別人壓的時候，自己拿到的魚變兩倍',
+  ]},
   { v:'0.12.1', date:'2026-09-08', notes:[
     '內部整理第二段：讀取資料時「哪個值該贏」的規則也搬出來了，同樣沒有玩法上的差別',
   ]},
@@ -292,6 +299,12 @@ export const MILESTONES = [
   { at:    250000, label: '二十五萬',  unlock: '🔥 火焰頭' },
   { at:    500000, label: '五十萬',    unlock: '🌈 彩虹' },
   { at:   1000000, label: '一百萬下',  unlock: '💎 鑽石' },
+  // 放置手段上線之後總數會長得快很多，所以先把路鋪長一點。
+  // 里程碑用完的話，進度條會因為 find() 找不到東西而整條消失。
+  { at:   2000000, label: '兩百萬下',   unlock: '🛸 幽浮' },
+  { at:   5000000, label: '五百萬下',   unlock: '🌠 流星雨' },
+  { at:  10000000, label: '一千萬下',   unlock: '🌌 銀河' },
+  { at:  25000000, label: '兩千五百萬', unlock: '🦚 極光企鵝' },
 ];
 
 // ----------------------------------------------------------------------------
@@ -455,6 +468,8 @@ export const HATS = [
   { e:'🔥', cost: 200, need:  250000, name:'火焰頭' },
   { e:'🌈', cost: 200, need:  500000, name:'彩虹' },
   { e:'💎', cost: 300, need: 1000000, name:'鑽石' },
+  { e:'🛸', cost: 350, need: 2000000, name:'幽浮' },
+  { e:'🌌', cost: 450, need:10000000, name:'銀河' },
 ];
 export const hatInfo = e => HATS.find(h => h.e === e) || { e, cost: 60, need: 0, name: '帽子' };
 
@@ -493,6 +508,7 @@ export const SKINS = {
     { id:'star',   name:'星空',     cost:150, need:   5000, emoji:'⭐️' },
     { id:'pizza',  name:'披薩雨',   cost:200, need:  25000, emoji:'🍕' },
     { id:'crown',  name:'皇冠雨',   cost:300, need: 100000, emoji:'👑' },
+    { id:'meteor', name:'流星雨',   cost:400, need:5000000, emoji:'🌠' },
   ],
   // 企鵝本體是灰的，所以先 sepia 再轉色相就能上色
   tint: [
@@ -503,6 +519,7 @@ export const SKINS = {
     { id:'ghost', name:'幽靈企鵝',   cost:180, need:  5000, filter:'grayscale(1) brightness(1.3) opacity(.6)' },
     { id:'gold',  name:'金企鵝',     cost:250, need: 25000, filter:'sepia(1) saturate(3.2) brightness(1.08) contrast(1.05)' },
     { id:'neon',  name:'霓虹企鵝',   cost:300, need:100000, filter:'sepia(1) hue-rotate(200deg) saturate(6) contrast(1.2)' },
+    { id:'aurora',name:'極光企鵝',   cost:500, need:25000000, filter:'sepia(1) hue-rotate(140deg) saturate(5) brightness(1.12) contrast(1.1)' },
   ],
   font: [
     { id:'plain',  name:'預設',   cost:  0, need:     0 },
@@ -544,6 +561,15 @@ export const AXES = {
   social: { name:'社交', icon:'🤝', color:'#2f7fd0', blurb:'跟朋友之間能做的事' },
   hunt:   { name:'探寶', icon:'🔍', color:'#a457d8', blurb:'找到更稀有的東西' },
 };
+
+// 三條軸從同一個起點長出來，末端再交會 —— 這樣才是一棵樹，不是三條平行線。
+//
+// 但老實說，「單一起點」本身不會增加深度：三條軸共用點數的時候，
+// 選擇壓力就已經存在了。真正增加深度的是**跨支節點** ——
+// 要兩條軸都有進度才點得起，所以走壓製＋探寶的人跟走社交＋探寶的人
+// 玩起來是兩種不同的遊戲，而不是同一個遊戲的兩種數值配置。
+export const CROSS = { name:'交會', icon:'🌳', color:'#3fa45b',
+                       blurb:'兩條路都走過一段，才到得了的地方' };
 
 // 每通過一個門檻（個人累計壓製）就 +1 技能點。里程碑另外再各 +1。
 // 全部點滿要 33 點，而這裡最多給 17 + 7 = 24 —— 點不滿是故意的，
@@ -589,11 +615,37 @@ export const SKILLS = [
   { id:'hunt4',   axis:'hunt',   tier:4, cost:5, icon:'🔆', name:'神話之眼',
     desc:'解鎖「神話」級寶物的掉落。整個小圈子最深的地方。',
     grants:'dropMyth' },
+
+  // ── 交會：needs 要兩條軸都有進度 ──
+  // 刻意要求兩邊的第三層，所以最快也要 6+6+4 = 16 點才碰得到一個。
+  // 它們應該長期掛在樹上當「看得到但還走不到的地方」。
+  { id:'cross1', axis:'cross', tier:5, cost:4, icon:'〽️', name:'餘震',
+    needs:['press3','hunt3'],
+    desc:'格魯攤倒的那一下會多滾一次寶物 —— 等於兩次機會',
+    grants:'aftershock' },
+  { id:'cross2', axis:'cross', tier:5, cost:4, icon:'🕵️', name:'情報網',
+    needs:['social3','hunt3'],
+    desc:'每幫過一個不同的人，掉落機率 +2%（最多 +20%）',
+    grants:'intel' },
+  { id:'cross3', axis:'cross', tier:5, cost:4, icon:'🔗', name:'同步',
+    needs:['press3','social3'],
+    desc:'幫別人壓的時候，你自己拿到的魚變兩倍',
+    grants:'syncFish' },
 ];
 
 export const skillInfo = id => SKILLS.find(s => s.id === id) || null;
 
-// 同一軸要照順序點：第 N 層要先有第 N−1 層。
-export const skillPrereq = sk =>
-  sk.tier === 1 ? null
-  : (SKILLS.find(s => s.axis === sk.axis && s.tier === sk.tier - 1)?.id || null);
+// 一個技能要先有哪些技能才點得起。回傳陣列（可能是空的）。
+//
+// 一般節點：同一軸的前一層。
+// 交會節點：自己寫在 needs 裡，通常是兩條不同軸的節點。
+export const skillNeeds = sk => {
+  if (!sk) return [];
+  if (sk.needs) return sk.needs;
+  if (sk.tier === 1) return [];
+  const prev = SKILLS.find(s => s.axis === sk.axis && s.tier === sk.tier - 1);
+  return prev ? [prev.id] : [];
+};
+
+// 舊名字，留給還沒改過來的呼叫點（只回第一個）
+export const skillPrereq = sk => skillNeeds(sk)[0] || null;
