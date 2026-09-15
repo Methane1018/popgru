@@ -26,6 +26,9 @@ export const firebaseConfig = {
 //  （順序是刻意的：不寫更新內容就升不了版。）
 // ----------------------------------------------------------------------------
 export const CHANGELOG = [
+  { v:'0.14.2', date:'2026-09-16', notes:[
+    '🎩 帽癡從「傳說」降到「一般」、效果從魚 +5% 改成 +2% —— 條件變簡單之後，它比「有型」還好拿',
+  ]},
   { v:'0.14.1', date:'2026-09-16', notes:[
     '🎩 帽癡改成只要集滿「一開始就能買」的 7 頂帽子 —— 里程碑解鎖的不用。本來每加一次里程碑就更難拿',
     '裝扮商店分成「一開始就有」和「里程碑才解鎖」兩區，帽子那一區會顯示帽癡的進度',
@@ -394,8 +397,13 @@ export const TREASURES = [
     hint:'連續 30 天都有來',           buff:{ kind:'fish', value:0.06 } },
   { id:'mt100k',  icon:'🗻', name:'十萬大山', rarity:'rare',     source:'achieve',
     hint:'小圈子總數突破十萬',          buff:{ kind:'fish', value:0.05 } },
-  { id:'hatlove', icon:'🎩', name:'帽癡',     rarity:'epic',     source:'achieve',
-    hint:'集滿一開始就能買的帽子（里程碑解鎖的不算）', buff:{ kind:'fish', value:0.05 } },
+  // 本來是傳說：條件是「集滿所有帽子」，要等小圈子壓到一千萬。
+  // v0.14.1 改成只看一開始就能買的 7 頂（合計 320 條魚）之後，
+  // 它比 🎨 有型（任意 10 件裝扮，一般級）還簡單 —— 所以降到一般。
+  // 「集滿全部」跟「卡進度」是互斥的；要一個稀有的帽子成就，用數量（例如擁有 12 頂），
+  // 那種目標加新帽子只會變簡單，不會越改越難。
+  { id:'hatlove', icon:'🎩', name:'帽癡',     rarity:'common',   source:'achieve',
+    hint:'集滿一開始就能買的帽子（里程碑解鎖的不算）', buff:{ kind:'fish', value:0.02 } },
   { id:'master',  icon:'🌳', name:'專精',     rarity:'myth',     source:'achieve',
     hint:'把任何一條技能軸的四個技能全部學會',    buff:{ kind:'fish', value:0.10 } },
 
