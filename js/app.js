@@ -1,7 +1,7 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.13.1';
+import * as S from './store.js?v=0.14.0';
 import {
   TUNING, ITEMS, MILESTONES, HATS, clampQty,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
@@ -9,7 +9,7 @@ import {
   TREASURES, RARITY, SOURCE_LABEL, EGG_TAG, tagOf, treasureHow,
   SKILLS, AXES, CROSS, SP_STEPS, skillNeeds,
   TREE_COLS, TREE_ROWS, SKILL_ROOT, treeEdges, treePos,
-} from './config.js?v=0.13.1';
+} from './config.js?v=0.14.0';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -335,16 +335,16 @@ function render() {
 
   const unread = st.inbox.filter(m => !m.read).length;
   // 圖示和標籤分開放，直接寫 textContent 會把兩個 span 一起洗掉
-  $('navInbox').querySelector('i').textContent  = unread ? '📬' : '📭';
-  $('navInbox').querySelector('em').textContent = unread ? `${unread} 封` : '信箱';
-  $('navInbox').classList.toggle('alert', unread > 0);
+  // 信箱在「大家」裡面，所以未讀數字要掛在「大家」這顆上 ——
+  // 頂層看不到有新信的話，禮物就會被漏看
+  const badge = $('navPeople').querySelector('.badge');
+  badge.hidden = !unread;
+  badge.textContent = unread > 9 ? '9+' : String(unread);
+  $('navPeople').classList.toggle('alert', unread > 0);
   $('navHome').hidden = v.isMine;
 
-  const social = st.mode === 'member';
-  $('navPeople').disabled = !social;
-  $('navItems').disabled  = !social;   // 裝扮訪客也能玩，資料先存本機
-  $('navInbox').disabled  = !social;
-  $('shareBtn').hidden    = !social;
+  // 名單和信箱都要帳號；商店、我的、其他訪客也能用（道具分頁在裡面自己擋）
+  $('navPeople').disabled = st.mode !== 'member';
 
 }
 
@@ -377,13 +377,160 @@ function closePanel() {
 $('scrim').onclick = closePanel;
 $('sheetClose').onclick = closePanel;
 
+// 分組：頂層只留四顆按鈕，每一顆打開是一個有分頁的面板。
+// 以後加新東西是多一個分頁，不是多一顆按鈕 —— 底下那排本來已經多到換行了。
+// 不做成藏起來的選單：這個遊戲已經有好幾次「朋友找不到東西」，
+// 分組至少保證每樣東西都在一層以內。
+const GROUPS = {
+  people: { title:'大家', tabs:['people', 'inbox'] },
+  shop:   { title:'商店', tabs:['items', 'wardrobe'] },
+  mine:   { title:'我的', tabs:['box', 'codex', 'skills'] },
+  more:   { title:'其他', tabs:['more', 'changelog'] },
+};
+const TAB_LABEL = { people:'名單', inbox:'信箱', items:'道具', wardrobe:'裝扮',
+                    box:'盒子', codex:'圖鑑', skills:'技能', more:'設定', changelog:'更新內容' };
+const groupOf = name => Object.keys(GROUPS).find(g => GROUPS[g].tabs.includes(name)) || null;
+
+// 要登入才有意義的分頁（名單、信箱要有帳號；道具大多是送人的）
+const MEMBER_ONLY = new Set(['people', 'inbox', 'items']);
+const tabAllowed  = t => !MEMBER_ONLY.has(t) || S.state.mode === 'member';
+
+// 切到某個分頁之後要載的資料
+const TAB_LOAD = {
+  people: () => S.loadRoster().then(() => refreshPanel('people')),
+  items:  () => S.loadRoster(),
+  // 也要名單才查得到寄件人現在的名字
+  inbox:  () => Promise.all([S.loadInbox(), S.loadRoster()]).then(() => refreshPanel('inbox')),
+};
+
+// 記住每一組上次看到哪個分頁。常去「我的 › 技能」的人不用每次多點一下。
+const lastTab = {};
+
+function openTab(name) {
+  // 從裝扮切走＝離開裝扮。沒按確認的預覽要收掉，不然切到別的分頁時
+  // 格魯還穿著一件沒買的衣服（跟 v0.9「預覽帽子沒買、原本的帽子不見」同一類）
+  if (openPanel === 'wardrobe' && name !== 'wardrobe') clearSkinPreview();
+  if (name === 'skills') skillDetail = null;
+  if (name === 'codex')  dexDetail = null;
+  const g = groupOf(name);
+  if (g) lastTab[g] = name;
+  showPanel(name);
+  TAB_LOAD[name]?.();
+}
+
+function openGroup(g) {
+  const ok = GROUPS[g].tabs.filter(tabAllowed);
+  openTab(ok.includes(lastTab[g]) ? lastTab[g] : ok[0]);
+}
+
+function tabBar(g, active) {
+  const bar = el('div', 'gtabs');
+  for (const t of GROUPS[g].tabs) {
+    const unread = t === 'inbox' ? S.state.inbox.filter(m => !m.read).length : 0;
+    const b = el('button', 'gtab' + (t === active ? ' on' : ''),
+                 TAB_LABEL[t] + (unread ? ` ${unread}` : ''));
+    b.type = 'button';
+    b.disabled = !tabAllowed(t);
+    if (b.disabled) b.title = '登入之後才能用';
+    b.onclick = () => { if (t !== active) openTab(t); };
+    bar.append(b);
+  }
+  return bar;
+}
+
 function renderPanel(name) {
   const body = $('sheetBody'); body.innerHTML = '';
-  $('sheetTitle').textContent =
-    { people:'大家的格魯', items:'道具', wardrobe:'裝扮', codex:'圖鑑', inbox:'信箱',
-      skills:'技能', me:'我的格魯', changelog:'更新內容' }[name] || '';
+  const g = groupOf(name);
+  $('sheetTitle').textContent = g ? GROUPS[g].title : ({ me:'我的格魯' }[name] || '');
+  // 細節頁（圖鑑某一格、技能某一個）上面有自己的「← 回去」，不要再疊一排分頁
+  const inDetail = (name === 'codex' && dexDetail) || (name === 'skills' && skillDetail);
+  if (g && !inDetail) body.append(tabBar(g, name));
   ({ people: panelPeople, items: panelItems, wardrobe: panelWardrobe, codex: panelCodex,
-     inbox: panelInbox, skills: panelSkills, me: panelMe, changelog: panelChangelog })[name]?.(body);
+     inbox: panelInbox, skills: panelSkills, me: panelMe, changelog: panelChangelog,
+     box: panelBox, more: panelMore })[name]?.(body);
+}
+
+/* --- 盒子 --- */
+// 你手上持有、會用掉或花掉的東西。
+// 寶物、裝扮、技能各自有自己的地方 —— 這裡只給數字和一條路過去，
+// 同一份清單列在兩個地方遲早會對不上。
+function panelBox(body) {
+  const me = S.state.me;
+  const held = [
+    ['🐟', '魚',     nf(me.fish),              '壓一下得一條，拿去買道具和裝扮'],
+    ['🥇', '金魚',   nf(me.goldfish || 0),
+       `距離下一條還有 ${nf(Math.max(0, S.goldfishOdds() - (me.goldTick || 0)))} 下`],
+    ['🏅', '金牌',   nf(me.medals || 0),       '別人送的，永久掛在你名字旁邊'],
+    ['🧊', '凍結卡', nf(me.freezes || 0),      '漏掉一天時自動用掉，保住連續天數'],
+    ['⚡', '雙倍魚', me.double ? `剩 ${nf(me.double)} 下` : '沒有', '接下來每一下拿雙倍魚'],
+  ];
+  const list = el('div', 'box-list');
+  for (const [icon, name, val, sub] of held) {
+    const r = el('div', 'box-row');
+    r.append(el('span', 'box-icon', icon));
+    const n = el('span', 'box-name', name);
+    n.append(el('span', 'box-sub', sub));
+    r.append(n, el('span', 'box-val', val));
+    list.append(r);
+  }
+  body.append(list);
+
+  body.append(el('p', 'note', '收藏'));
+  const got = TREASURES.filter(t => S.hasTreasure(t.id)).length;
+  const links = [
+    ['🎁', '寶物',   `${got} / ${TREASURES.length}`, 'codex'],
+    ['🎨', '裝扮',   `${S.cosmeticCount()} 件`,      'wardrobe'],
+    ['🌳', '技能點', `可用 ${S.spLeft()}`,           'skills'],
+  ];
+  const l2 = el('div', 'box-list');
+  for (const [icon, name, val, tab] of links) {
+    const r = el('div', 'box-row');
+    r.append(el('span', 'box-icon', icon), el('span', 'box-name', name), el('span', 'box-val', val));
+    const go = el('button', 'box-link', '看 →');
+    go.type = 'button';
+    go.onclick = () => openTab(tab);
+    r.append(go);
+    l2.append(r);
+  }
+  body.append(l2);
+}
+
+/* --- 其他 --- */
+function toggleSound() {
+  soundOn = !soundOn;
+  try { localStorage.setItem('popgru.sound', soundOn ? '1' : '0'); } catch {}
+}
+
+async function shareGru() {
+  const url = `${location.origin}${location.pathname}?gru=${S.state.me.uid}`;
+  try { await navigator.clipboard.writeText(url); toast('連結複製好了，丟給朋友'); }
+  catch { prompt('把這個連結丟給朋友：', url); }
+}
+
+function panelMore(body) {
+  const list = el('div', 'box-list');
+
+  const r1 = el('div', 'box-row');
+  r1.append(el('span', 'box-icon', soundOn ? '🔊' : '🔇'), el('span', 'box-name', '音效'));
+  const t = el('button', 'btn small', soundOn ? '關掉' : '打開');
+  t.type = 'button';
+  t.onclick = () => { toggleSound(); renderPanel('more'); };
+  r1.append(t);
+  list.append(r1);
+
+  if (S.state.mode === 'member') {                  // 要登入才有自己的格魯可以分享
+    const r2 = el('div', 'box-row');
+    const n = el('span', 'box-name', '分享我的格魯');
+    n.append(el('span', 'box-sub', '複製連結，朋友點了會直接進你家'));
+    r2.append(el('span', 'box-icon', '🔗'), n);
+    const b = el('button', 'btn small primary', '複製');
+    b.type = 'button';
+    b.onclick = shareGru;
+    r2.append(b);
+    list.append(r2);
+  }
+  body.append(list);
+  body.append(el('p', 'note', `POPGRU v${APP_VERSION}`));
 }
 
 /* --- 外觀 --- */
@@ -1355,10 +1502,10 @@ $('brand').onclick     = () => {
   if (brandRun >= 5) S.unlockTreasure('curious');
   showPanel('changelog');
 };
-$('navPeople').onclick = () => { showPanel('people'); S.loadRoster().then(() => refreshPanel('people')); };
-$('navItems').onclick    = () => { showPanel('items'); S.loadRoster(); };
-$('navWardrobe').onclick = () => showPanel('wardrobe');
-$('navCodex').onclick    = () => showPanel('codex');
+$('navPeople').onclick = () => openGroup('people');
+$('navShop').onclick   = () => openGroup('shop');
+$('navMine').onclick   = () => openGroup('mine');
+$('navMore').onclick   = () => openGroup('more');
 
 /* 自動液壓機（壓製軸第四層）。故意保守：
    只在分頁看得見、只在自己家、按住或攤平時讓開，而且不觸發彩蛋。
@@ -1371,12 +1518,6 @@ setInterval(() => {
   press(null, true);
   setTimeout(release, 140);
 }, TUNING.autopressMs);
-$('navSkills').onclick   = () => { skillDetail = null; showPanel('skills'); };
-$('navInbox').onclick  = () => {
-  showPanel('inbox');
-  // 也要名單才查得到寄件人現在的名字
-  Promise.all([S.loadInbox(), S.loadRoster()]).then(() => refreshPanel('inbox'));
-};
 $('gruName').onclick   = () => {
   if (!S.state.viewing.isMine) return;          // 在別人家不能改人家的名字
   showPanel('me');
@@ -1388,18 +1529,6 @@ $('navHome').onclick   = async () => {
   history.replaceState(null, '', location.pathname);
   toast('回到自己家');
 };
-$('shareBtn').onclick = async () => {
-  const url = `${location.origin}${location.pathname}?gru=${S.state.me.uid}`;
-  try { await navigator.clipboard.writeText(url); toast('連結複製好了，丟給朋友'); }
-  catch { prompt('把這個連結丟給朋友：', url); }
-};
-$('sound').onclick = () => {
-  soundOn = !soundOn;
-  try { localStorage.setItem('popgru.sound', soundOn ? '1' : '0'); } catch {}
-  $('sound').querySelector('i').textContent = soundOn ? '🔊' : '🔇';
-  $('sound').setAttribute('aria-pressed', String(soundOn));
-};
-$('sound').querySelector('i').textContent = soundOn ? '🔊' : '🔇';
 
 /* ------------------------------------------------------------------ 啟動 -- */
 S.on('state', render);

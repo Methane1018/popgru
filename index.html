@@ -224,6 +224,32 @@
   .grid.text .skin-btn{width:100%; min-width:0}
   /* 裝扮的分類切換 */
   .tabs{display:flex; gap:6px; flex-wrap:wrap; margin:2px 0 6px}
+
+  /* 分組面板最上面那一列。跟裝扮裡的小分類（帽子／背景…）長得不一樣，
+     兩排疊在一起時才分得出哪一排是哪一層。 */
+  .gtabs{display:flex; margin:-2px 0 12px; border-bottom:1px solid var(--line)}
+  .gtab{flex:1; appearance:none; border:0; background:none; font:inherit; font-size:14px;
+        font-weight:800; color:var(--muted); padding:10px 4px 9px; cursor:pointer;
+        border-bottom:2.5px solid transparent; margin-bottom:-1px}
+  .gtab.on{color:var(--ink); border-bottom-color:var(--accent)}
+  .gtab:disabled{opacity:.4; cursor:default}
+
+  /* 信箱搬進「大家」之後，未讀數字一定要掛在頂層 —— 不然會漏看禮物 */
+  .nav .btn{position:relative}
+  .nav .btn .badge{position:absolute; top:3px; right:calc(50% - 22px); min-width:16px; height:16px;
+                   padding:0 4px; border-radius:99px; background:#e0473a; color:#fff;
+                   font-size:10px; font-weight:800; line-height:16px; text-align:center}
+
+  /* 盒子 */
+  .box-row{display:flex; align-items:center; gap:10px; padding:10px 4px;
+           border-bottom:1px solid var(--line)}
+  .box-row:last-child{border-bottom:0}
+  .box-icon{font-size:22px; width:30px; text-align:center}
+  .box-name{flex:1; font-weight:700}
+  .box-sub{display:block; font-size:11.5px; color:var(--muted); font-weight:600; margin-top:2px}
+  .box-val{font-weight:800; font-variant-numeric:tabular-nums}
+  .box-link{appearance:none; border:0; background:none; font:inherit; font-weight:800;
+            color:var(--accent); cursor:pointer; padding:4px 0}
   .tab{appearance:none; border:1px solid var(--line); background:var(--card); color:var(--muted);
        font:inherit; font-size:12.5px; font-weight:700; padding:6px 12px; border-radius:999px;
        cursor:pointer; line-height:1}
@@ -439,15 +465,13 @@
 </main>
 
 <nav class="nav">
+  <!-- 頂層只留四顆，每一顆打開是有分頁的面板（見 js/app.js 的 GROUPS）。
+       以後加新東西是多一個分頁，不是多一顆按鈕。 -->
   <button class="btn" id="navHome" type="button" hidden><i>🏠</i><em>回家</em></button>
-  <button class="btn" id="navPeople" type="button"><i>👥</i><em>大家</em></button>
-  <button class="btn" id="navItems" type="button"><i>🎁</i><em>道具</em></button>
-  <button class="btn" id="navWardrobe" type="button"><i>🎨</i><em>裝扮</em></button>
-  <button class="btn" id="navCodex" type="button"><i>📖</i><em>圖鑑</em></button>
-  <button class="btn" id="navSkills" type="button"><i>🌳</i><em>技能</em></button>
-  <button class="btn" id="navInbox" type="button"><i>📭</i><em>信箱</em></button>
-  <button class="btn" id="shareBtn" type="button" hidden><i>🔗</i><em>分享</em></button>
-  <button class="btn" id="sound" type="button" aria-pressed="true"><i>🔊</i><em>音效</em></button>
+  <button class="btn" id="navPeople" type="button"><i>👥</i><em>大家</em><b class="badge" hidden></b></button>
+  <button class="btn" id="navShop" type="button"><i>🛍</i><em>商店</em></button>
+  <button class="btn" id="navMine" type="button"><i>🎒</i><em>我的</em></button>
+  <button class="btn" id="navMore" type="button"><i>⚙️</i><em>其他</em></button>
 </nav>
 
 <div class="scrim" id="scrim"></div>
@@ -470,6 +494,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=0.13.1"></script>
+<script type="module" src="js/app.js?v=0.14.0"></script>
 </body>
 </html>

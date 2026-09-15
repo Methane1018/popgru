@@ -400,6 +400,16 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   check('畫面上的級別都走 tagOf', !leaks.length, `直接讀了 ${[...new Set(leaks)]}`);
 }
 
+// app.js 用到的每一個 $('id') 都必須真的在 index.html 裡。
+// 少一個的話，寫在最外層的 $('x').onclick = … 會在載入時直接丟錯 ——
+// 整個遊戲打不開，而且只有主控台看得到為什麼。搬動或刪掉按鈕時最容易踩到。
+{
+  const htmlIds = new Set([...html.matchAll(/\sid="([\w-]+)"/g)].map(m => m[1]));
+  const used = [...new Set([...app.matchAll(/\$\('([\w-]+)'\)/g)].map(m => m[1]))];
+  const missing = used.filter(id => !htmlIds.has(id));
+  check('app.js 用到的元素都存在於 index.html', !missing.length, String(missing));
+}
+
 // nav 的按鈕是「圖示 <i> ＋ 標籤 <em>」兩層。
 // 對它們直接寫 .textContent 會把兩個 span 一起洗掉，按鈕就只剩一個字，
 // 而且只有在「有未讀信」或「按了靜音」之後才看得到 —— 典型的靜默故障。
