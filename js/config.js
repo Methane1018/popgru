@@ -26,6 +26,11 @@ export const firebaseConfig = {
 //  （順序是刻意的：不寫更新內容就升不了版。）
 // ----------------------------------------------------------------------------
 export const CHANGELOG = [
+  { v:'0.14.1', date:'2026-09-16', notes:[
+    '🎩 帽癡改成只要集滿「一開始就能買」的 7 頂帽子 —— 里程碑解鎖的不用。本來每加一次里程碑就更難拿',
+    '裝扮商店分成「一開始就有」和「里程碑才解鎖」兩區，帽子那一區會顯示帽癡的進度',
+    '已經拿到帽癡的人不受影響',
+  ]},
   { v:'0.14.0', date:'2026-09-16', notes:[
     '下面那排按鈕整理成四顆：👥 大家、🛍 商店、🎒 我的、⚙️ 其他 —— 點進去再用分頁切換',
     '信箱搬進「大家」裡了，有新信的時候「大家」這顆會亮並顯示幾封',
@@ -390,7 +395,7 @@ export const TREASURES = [
   { id:'mt100k',  icon:'🗻', name:'十萬大山', rarity:'rare',     source:'achieve',
     hint:'小圈子總數突破十萬',          buff:{ kind:'fish', value:0.05 } },
   { id:'hatlove', icon:'🎩', name:'帽癡',     rarity:'epic',     source:'achieve',
-    hint:'集滿所有帽子',               buff:{ kind:'fish', value:0.05 } },
+    hint:'集滿一開始就能買的帽子（里程碑解鎖的不算）', buff:{ kind:'fish', value:0.05 } },
   { id:'master',  icon:'🌳', name:'專精',     rarity:'myth',     source:'achieve',
     hint:'把任何一條技能軸的四個技能全部學會',    buff:{ kind:'fish', value:0.10 } },
 

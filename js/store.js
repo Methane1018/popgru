@@ -10,12 +10,12 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillNeeds,
-} from './config.js?v=0.14.0';
+} from './config.js?v=0.14.1';
 import {
   planFlush, planSnapshot, isInc, isUnion, isNow,
   NO_NAME, realName, mergeOwned, mergeCounts, readHelped,
   pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS,
-} from './plan.js?v=0.14.0';
+} from './plan.js?v=0.14.1';
 // 這幾個是純決策，定義在 plan.js；這裡轉出去讓呼叫端和測試照舊拿得到
 export { mergeOwned, mergeCounts, readHelped, pickMirror };
 
@@ -948,6 +948,9 @@ export function buffOf(kind) {
 
 export const helpedCount = () => Object.keys(state.me.helped || {}).length;
 
+// 一開始就能買的帽子（不用等里程碑）。帽癡成就只看這一批。
+export const starterHats = () => SKINS.hat.filter(h => h.cost > 0 && !h.need);
+
 // 小圈子總數：伺服器的數字 ＋ 這台裝置還沒送出去的點擊。
 // 直接讀 state.global.squashes 的話，那是「上一次寫入時的快照」——
 // 你連壓 20 秒畫面完全不動，然後突然跳一大格。里程碑進度條也跟著卡住。
@@ -1169,7 +1172,10 @@ const ACHIEVE = {
   loved:   () => (state.me.giftsReceived || 0) >= 10,
   mt100k:  () => globalNow() >= 100000,
   stylish: () => cosmeticCount() >= 10,
-  hatlove: () => SKINS.hat.filter(h => h.cost > 0).every(h => ownsSkin('hat', h.id)),
+  // 只算「一開始就能買」的帽子。本來是全部帽子，但里程碑帽子要等小圈子壓到
+  // 那個數字才買得到 —— 還沒拿到的人會卡住，而且每次加里程碑（v0.13.0 加到
+  // 一千萬）都讓它更難。一個成就的條件不應該隨著更新自己變難。
+  hatlove: () => starterHats().every(h => ownsSkin('hat', h.id)),
   master:  () => Object.keys(AXES).some(a => axisDone(a)),
 };
 

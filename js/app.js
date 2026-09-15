@@ -1,7 +1,7 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.14.0';
+import * as S from './store.js?v=0.14.1';
 import {
   TUNING, ITEMS, MILESTONES, HATS, clampQty,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
@@ -9,7 +9,7 @@ import {
   TREASURES, RARITY, SOURCE_LABEL, EGG_TAG, tagOf, treasureHow,
   SKILLS, AXES, CROSS, SP_STEPS, skillNeeds,
   TREE_COLS, TREE_ROWS, SKILL_ROOT, treeEdges, treePos,
-} from './config.js?v=0.14.0';
+} from './config.js?v=0.14.1';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -615,8 +615,7 @@ function panelWardrobe(body) {
   const kind = wardrobeTab;
   // 文字按鈕比符號按鈕寬得多，兩者不能共用同一種排法
   const textKind = kind !== 'hat' && kind !== 'hold';
-  const grid = el('div', 'grid' + (textKind ? ' text' : ''));
-  for (const item of SKINS[kind]) {
+  const cellFor = item => {
     const has      = S.ownsSkin(kind, item.id);
     const locked   = S.skinLocked(kind, item.id);
     const selected = sel[kind] === item.id;
@@ -650,9 +649,31 @@ function panelWardrobe(body) {
       cell.append(el('span', 'hat-need',
         inUse ? '使用中' : has ? '已擁有' : `${item.cost} 🐟`));
     }
-    grid.append(cell);
+    return cell;
+  };
+  const makeGrid = items => {
+    const g = el('div', 'grid' + (textKind ? ' text' : ''));
+    items.forEach(i => g.append(cellFor(i)));
+    return g;
+  };
+
+  // 分成兩區。本來混在一起，里程碑一過，就再也看不出哪些是一開始就有的 ——
+  // 而帽癡成就剛好只看「一開始就有」那一區。
+  const starter   = SKINS[kind].filter(i => !i.need);
+  const milestone = SKINS[kind].filter(i => i.need);
+  body.append(el('p', 'note', '一開始就有'));
+  if (kind === 'hat') {
+    const pool = S.starterHats();
+    const own  = pool.filter(h => S.ownsSkin('hat', h.id)).length;
+    body.append(el('p', 'hint-sm', S.hasTreasure('hatlove')
+      ? `這一區全部集滿了，🎩 帽癡已經到手`
+      : `這一區全部集滿會解鎖 🎩 帽癡 · 目前 ${own} / ${pool.length}`));
   }
-  body.append(grid);
+  body.append(makeGrid(starter));
+  if (milestone.length) {
+    body.append(el('p', 'note', '小圈子壓到里程碑才解鎖'));
+    body.append(makeGrid(milestone));
+  }
 
   // 底部確認列：真正花錢的地方只有這裡
   const bar = el('div', 'skin-bar');

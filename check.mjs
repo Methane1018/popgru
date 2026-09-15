@@ -294,6 +294,14 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
   check('折扣後至少還是 1', /Math\.max\(1, Math\.round\(item\.cost/.test(store));
 }
 
+// 成就的條件不能隨著更新自己變難。
+// 帽癡本來是「集滿所有帽子」，每加一次里程碑帽子，還沒拿到的人就更難一點；
+// v0.13.0 加到一千萬之後幾乎不可能。所以它只能看「一開始就能買」的那一批。
+{
+  check('帽癡只看初始帽子', /hatlove:\s*\(\)\s*=>\s*starterHats\(\)/.test(store));
+  check('初始帽子排除里程碑帽子', /starterHats = \(\) => SKINS\.hat\.filter\(h => h\.cost > 0 && !h\.need\)/.test(store));
+}
+
 // 花掉的錢在寫出去之前，快照必須把它算進來。
 // 快照給的是伺服器的舊數字；不加上還沒送出的扣款，畫面就會「退錢」——
 // 用金魚買寶物之後點一下，金魚又變回原來的數目（真的發生過）。

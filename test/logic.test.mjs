@@ -1174,5 +1174,37 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   S.state.me.helped = {};
 }
 
+/* ============ 帽癡只看初始帽子（v0.14.1） ============
+   本來是「集滿所有帽子」，但里程碑帽子要等小圈子壓到那個數字才買得到。
+   還沒拿到的人會卡住，而且每次加里程碑都讓它更難 ——
+   v0.13.0 加到一千萬之後，它幾乎變成不可能。                      */
+{
+  const { SKINS: SKN } = await import('../js/config.js');
+  const pool = S.starterHats();
+  ok('★ 初始帽子不含「不戴」', !pool.some(h => h.id === 'none'));
+  ok('★ 初始帽子不含里程碑帽子', pool.every(h => !h.need), pool.map(h => h.id).join(''));
+  ok('★ 初始帽子都要花錢買', pool.every(h => h.cost > 0));
+
+  S.state.me.treasures = []; S.state.me.ownedSkins = []; S.state.me.ownedHats = [];
+  S.state.me.ownedHats = pool.slice(0, -1).map(h => h.id);
+  S.checkAchievements();
+  ok('★ 差一頂就還沒拿到', !S.hasTreasure('hatlove'), S.state.me.ownedHats.join(''));
+
+  S.state.me.ownedHats = pool.map(h => h.id);
+  S.checkAchievements();
+  ok('★ 集滿初始帽子就拿到帽癡', S.hasTreasure('hatlove'), S.state.me.ownedHats.join(''));
+  ok('★ 完全不需要里程碑帽子',
+     !S.state.me.ownedHats.some(id => (SKN.hat.find(h => h.id === id) || {}).need));
+
+  // 這才是真正要防的：以後再加里程碑帽子，帽癡不能變難
+  S.state.me.treasures = [];
+  SKN.hat.push({ id:'🪐', name:'測試用行星', cost:999, need:99999999 });
+  S.checkAchievements();
+  ok('★ 之後加了里程碑帽子，帽癡照樣拿得到', S.hasTreasure('hatlove'));
+  SKN.hat.pop();
+
+  S.state.me.treasures = []; S.state.me.ownedHats = []; S.state.me.ownedSkins = [];
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
