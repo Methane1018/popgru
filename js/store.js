@@ -10,12 +10,12 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillNeeds,
-} from './config.js?v=0.14.3';
+} from './config.js?v=0.14.4';
 import {
   planFlush, planSnapshot, isInc, isUnion, isNow,
   NO_NAME, realName, mergeOwned, mergeCounts, readHelped, absFingerprint,
   pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS,
-} from './plan.js?v=0.14.3';
+} from './plan.js?v=0.14.4';
 // 這幾個是純決策，定義在 plan.js；這裡轉出去讓呼叫端和測試照舊拿得到
 export { mergeOwned, mergeCounts, readHelped, pickMirror };
 
@@ -490,7 +490,10 @@ async function claimGuestProgress(uid) {
 }
 
 // 上次關頁沒送出去的點擊，開啟時補送
+let recoveredFor = null;                 // 同一次登入只補送一次，不然會重複計入
 async function recoverOutbox(uid) {
+  if (recoveredFor === uid) return;
+  recoveredFor = uid;
   const o = outboxRead();
   if (!o || o.uid !== uid) return;
   const targets = Object.keys(o.items || {});
@@ -510,10 +513,9 @@ async function recoverOutbox(uid) {
       delete o.items[t];
       outboxWrite(o);
     }
-    flushTarget = to;
-    state.pending += it.n; pendFish += it.fish; pendGold += it.gold;
-    await flush();                       // 一次送一個對象
+    pendAdd(to, it.n, it.fish, it.gold);   // 各自掛在自己的對象名下
   }
+  await flush();                           // flush 一次送一個，送完會自己排下一輪
   if (total) {
     console.log(`POPGRU: 補送上次沒寫入的 ${total} 下`);
     emit('recovered', { n: total });
@@ -558,7 +560,6 @@ export async function goHome() {
 }
 
 /* --------------------------------------------------------------- squash -- */
-let flushTarget = null;
 let pendMagic = { uid:null, n:0 };   // 👋 魔法手要幫朋友壓的量
 // 裝扮增益是百分比，但魚是整數。零頭先累積著，湊滿一條才發，
 // 這樣不會出現 0.5 條魚，長期下來比例也是對的。
@@ -659,12 +660,9 @@ export function squash() {
     // 而格魯快照還沒回來時那是 null —— 結果整批寫入的對象是 null，
     // 格魯和小圈子總數兩份就被整個跳過，只有個人資料寫得出去。
     const targetUid = v.isMine ? (state.me.uid || v.uid) : v.uid;
-    if (flushTarget && flushTarget !== targetUid) flush();
-    flushTarget = targetUid;
-    state.pending += 1;
-    pendFish += r.gained;
-    if (r.goldfish) pendGold += 1;
-    outboxAdd(me.uid, flushTarget, 1, r.gained, r.goldfish ? 1 : 0);   // 先落地再說
+    // 記在這個對象名下。換對象不用先送出 —— 兩邊各自累積，flush 一次送一個。
+    pendAdd(targetUid, 1, r.gained, r.goldfish ? 1 : 0);
+    outboxAdd(me.uid, targetUid, 1, r.gained, r.goldfish ? 1 : 0);   // 先落地再說
     scheduleFlush();                     // 停手 1.5 秒就寫出去，不要等滿 8 秒
     if (state.pending >= TUNING.maxPerFlush) flush();
   } else {
@@ -676,7 +674,39 @@ export function squash() {
 }
 
 /* ------------------------------------------------------------ 批次寫入 -- */
-let pendFish = 0, pendGold = 0, flushing = false, flushTimer = null;
+// 待送的點擊照「壓在誰家」分開記 —— 跟待送匣（outbox）同一個形狀。
+//
+// ⚠️ 本來是一個 flushTarget ＋ 一組總數。問題是換對象時的那行
+// `if (flushTarget !== targetUid) flush()` 在前一批還在送的時候會直接 return，
+// 下一行卻照樣把對象換掉 —— 於是在自己家賺的魚被算到朋友頭上，
+// 而待送匣裡「自己家」那筆永遠沒人結清。每次重開就再加一次，魚永遠用不完。
+//
+// 分開記之後，結清用的 key 一定跟記錄時的 key 相同，不會再有孤兒。
+let pendBy = {};                         // { uid: { n, fish, gold } }
+let pendFish = 0, pendGold = 0;          // 總數，給快照重算和畫面用
+let flushing = false, flushTimer = null;
+
+function syncPendTotals() {
+  let n = 0, fish = 0, gold = 0;
+  for (const it of Object.values(pendBy)) { n += it.n; fish += it.fish; gold += it.gold; }
+  state.pending = n; pendFish = fish; pendGold = gold;
+}
+function pendAdd(uid, n, fish, gold) {
+  if (!uid) return;                      // 對象不明就不要記，免得又出現一筆 "null"
+  const it = (pendBy[uid] ||= { n:0, fish:0, gold:0 });
+  it.n += n; it.fish += fish; it.gold += gold;
+  syncPendTotals();
+}
+// 這一批要送哪個對象。一次只送一個，剩下的排下一輪 ——
+// 這樣「寫出去的量」和「結清的 key」永遠是同一筆。
+function pendPick() {
+  return Object.keys(pendBy).find(k => {
+    const it = pendBy[k];
+    return it.n || it.fish || it.gold;
+  }) || null;
+}
+export const _pendForTest = () => ({ by: JSON.parse(JSON.stringify(pendBy)), ...pendTotalsForTest() });
+const pendTotalsForTest = () => ({ n: state.pending, fish: pendFish, gold: pendGold });
 // 正在送出、但伺服器還沒確認的量。
 // 少了這個，送出期間來的快照會用「還沒加上這批」的伺服器數字覆蓋畫面，
 // 看起來就像數字自己往回跳。
@@ -752,14 +782,17 @@ export async function flush() {
   // 要等 8 秒的保底定時器才會被撿走，剛好卡在「壓完馬上關掉」的空隙。
   if (flushing) { scheduleFlush(); return; }
   clearTimeout(flushTimer);
-  const n = state.pending, fish = pendFish, gold = pendGold, target = flushTarget;
+  const target = pendPick();
+  const batch = target ? pendBy[target] : { n:0, fish:0, gold:0 };
+  const n = batch.n, fish = batch.fish, gold = batch.gold;
   const inc = pendInc, uni = pendUnion, set = pendSet, magic = pendMagic;
   if (!n && !fish && !gold && !magic.n && !hasPend()) return;
 
   flushing = true;
   inflight = { n, fish, gold };                 // 送出期間先記著，快照才不會把畫面往回拉
   inflightInc = inc;                            // 扣款也一樣，不然畫面會先退錢再扣一次
-  state.pending = 0; pendFish = 0; pendGold = 0; flushTarget = null;
+  if (target) delete pendBy[target];
+  syncPendTotals();
   pendInc = {}; pendUnion = {}; pendSet = {}; pendReconcile = false;
   pendMagic = { uid:null, n:0 };
   const { F, db } = fb, me = state.me;
@@ -794,8 +827,7 @@ export async function flush() {
 ` +
       `  等在待送匣的不會掉，但伺服器沒收到`);
     if (failCount === 3) emit('writefail', { code: e && e.code, message: e && e.message });
-    state.pending += n; pendFish += fish; pendGold += gold;
-    flushTarget = target;
+    if (target) pendAdd(target, n, fish, gold);   // 退回原本那個對象名下，不會跑到別人身上
     // 退回去也要用合併的方式，不能整包塞回去 —— 這段期間可能又累積了新的
     for (const [f, v] of Object.entries(inc)) queueInc(f, v);
     for (const [f, s] of Object.entries(uni)) s.forEach(v => queueUnion(f, v));
@@ -806,6 +838,7 @@ export async function flush() {
     flushing = false;
     inflight = { n:0, fish:0, gold:0 };
     inflightInc = {};
+    if (pendPick()) scheduleFlush();             // 還有別的對象在排隊
     if (state.pending || pendFish || pendGold) scheduleFlush();   // 期間又累積了就再送
   }
 }

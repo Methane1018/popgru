@@ -1254,5 +1254,51 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
      P.absFingerprint(a) !== P.absFingerprint({ ...a, streak: 2 }));
 }
 
+/* ============ 待送量照對象分開記（v0.14.4） ============
+   真實災情：魚消耗之後又跳回「原來的數字 ＋ 增加的數字」，永遠用不完。
+   原因是換對象時 `if (flushTarget !== targetUid) flush()` 在前一批還在送的時候
+   會直接 return，下一行卻照樣換了對象 —— 在自己家賺的被算到朋友頭上，
+   待送匣裡「自己家」那筆永遠沒人結清，每次重開再加一次。            */
+{
+  S.state.mode = 'member'; S.state.me.uid = 'me'; S.state.me.loaded = true;
+  S.state.me.treasures = []; S.state.me.skills = [];
+  setRandom(1); TUNING.helpCap = 0;
+
+  const before = S._pendForTest();
+  const d = (after, uid) => (after.by[uid] || { n:0 }).n - ((before.by[uid] || { n:0 }).n);
+
+  // 在自己家壓三下
+  S.state.viewing = { ...S.state.myGru, uid:'me', isMine:true };
+  S.squash(); S.squash(); S.squash();
+  const home = S._pendForTest();
+  ok('★ 自己家的三下記在自己名下', d(home, 'me') === 3, JSON.stringify(home.by));
+
+  // 馬上換去朋友家壓兩下（本來這裡會把自己家那筆吃掉）
+  S.state.viewing = { uid:'fr', name:'x', ownerName:'x', squashes:0, isMine:false, skin:{} };
+  S.squash(); S.squash();
+  const away = S._pendForTest();
+  ok('★ 朋友家的兩下記在朋友名下', d(away, 'fr') === 2, JSON.stringify(away.by));
+  ok('★ 自己家那三下還在，沒被吃掉', d(away, 'me') === 3, JSON.stringify(away.by));
+  ok('★ 兩個對象各自分開', Object.keys(away.by).includes('me') && Object.keys(away.by).includes('fr'));
+
+  // 總數要等於各對象相加
+  const sum = Object.values(away.by).reduce((a, it) => a + it.n, 0);
+  ok('★ 總數等於各對象相加', away.n === sum, `${away.n} vs ${sum}`);
+  const fishSum = Object.values(away.by).reduce((a, it) => a + it.fish, 0);
+  ok('★ 魚的總數也對得起來', away.fish === fishSum, `${away.fish} vs ${fishSum}`);
+
+  // 再換回自己家，要累加到原本那一筆，不是另外開一筆
+  S.state.viewing = { ...S.state.myGru, uid:'me', isMine:true };
+  S.squash();
+  const back = S._pendForTest();
+  ok('★ 換回來會累加到原本那筆', d(back, 'me') === 4, JSON.stringify(back.by));
+  ok('★ 對象數量沒有變多', Object.keys(back.by).length === Object.keys(away.by).length,
+     Object.keys(back.by).join(','));
+
+  TUNING.helpCap = 300;
+  S.state.mode = 'guest'; S.state.me.uid = null; S.state.me.loaded = false;
+  S.state.viewing = { ...S.state.myGru, isMine:true };
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

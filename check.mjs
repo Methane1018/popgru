@@ -80,7 +80,18 @@ const check = (name, ok, detail = '') => {
         /if \(!gruLoaded && !s\.exists\(\) && s\.metadata\.fromCache\) return;/.test(store));
   check('在自己家時寫入對象用自己的 uid',
         /const targetUid = v\.isMine \? \(state\.me\.uid \|\| v\.uid\) : v\.uid;/.test(store));
-  check('待送匣記的是同一個對象', /outboxAdd\(me\.uid, flushTarget,/.test(store));
+  // 待送量和待送匣要用同一個 key 記。不同的話，結清時會找不到那一筆，
+  // 它就永遠留在待送匣裡，每次重開再加一次 —— 魚永遠用不完（DEVLOG 第 25 條）。
+  check('待送量和待送匣記同一個對象',
+        /pendAdd\(targetUid, 1, r\.gained/.test(store)
+        && /outboxAdd\(me\.uid, targetUid, 1, r\.gained/.test(store));
+  check('待送量照對象分開記', /let pendBy = \{\};/.test(store));
+  check('一次只送一個對象', /const target = pendPick\(\);/.test(store));
+  check('結清用的是送出的那個對象',
+        /outboxSettle\(me\.uid, target, n, fish, gold\)/.test(store));
+  check('失敗時退回原本的對象', /if \(target\) pendAdd\(target, n, fish, gold\);/.test(store));
+  check('還有別的對象會排下一輪', /if \(pendPick\(\)\) scheduleFlush\(\);/.test(store));
+  check('沒有殘留的單一 flushTarget', !/^\s*(let|const) flushTarget/m.test(store));
   check('待送匣不收空對象', /if \(!uid \|\| !target\) return;/.test(store));
   // 這些函式都不該 await Firestore 寫入：離線時寫入會被排隊而不是失敗，
   // await 下去整個函式卡住，呼叫端的重畫也不會執行。
