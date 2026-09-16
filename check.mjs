@@ -50,7 +50,19 @@ const check = (name, ok, detail = '') => {
     check('鏡像欄位與 flush 寫回一致', !onlyW.length && !onlyM.length,
           `只寫不鏡像=${onlyW} 只鏡像不寫=${onlyM}`);
   }
-  check('每次 sync 都會存鏡像', /const sync = \(\) => \{ mirrorSave\(\);/.test(store));
+  {
+    const syncBody = (store.match(/const sync = \(\) => \{[\s\S]*?\n\};/) || [''])[0];
+    check('每次 sync 都會存鏡像', /mirrorSave\(\);/.test(syncBody), syncBody.slice(0, 60));
+    // 多台裝置靠 absAt 決定誰比較新，所以絕對欄位一改就要蓋時間戳；
+    // 但只有真的改到才蓋，不然光是讀個名單也會讓這台裝置看起來最新
+    check('絕對欄位有變才蓋時間戳',
+          /absFingerprint\(state\.me\)/.test(syncBody) && /absAt = Date\.now\(\)/.test(syncBody));
+  }
+  // 兩台裝置的判斷：比時間戳，不能比日期（同一天會永遠以本機為準）
+  check('誰比較新是比 absAt', /const a = Number\(mir\.absAt\)/.test(plan));
+  check('absAt 也要寫出去', /absAt: me\.absAt/.test(plan));
+  check('別台比較新時會跟上',
+        /\(d\.absAt \|\| 0\) > \(state\.me\.absAt \|\| 0\)/.test(store));
   // 送出中的量要記著，否則期間來的快照會用舊的伺服器數字把畫面往回拉
   check('flush 會記錄 inflight', /inflight = \{ n, fish, gold \};/.test(store));
   check('flush 結束會清掉 inflight', /inflight = \{ n:0, fish:0, gold:0 \};[\s\S]{0,120}scheduleFlush/.test(store));

@@ -10,12 +10,12 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillNeeds,
-} from './config.js?v=0.14.2';
+} from './config.js?v=0.14.3';
 import {
   planFlush, planSnapshot, isInc, isUnion, isNow,
-  NO_NAME, realName, mergeOwned, mergeCounts, readHelped,
+  NO_NAME, realName, mergeOwned, mergeCounts, readHelped, absFingerprint,
   pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS,
-} from './plan.js?v=0.14.2';
+} from './plan.js?v=0.14.3';
 // 這幾個是純決策，定義在 plan.js；這裡轉出去讓呼叫端和測試照舊拿得到
 export { mergeOwned, mergeCounts, readHelped, pickMirror };
 
@@ -68,7 +68,7 @@ const blankMe = () => ({
   ownedHats:[], ownedSkins:[], loaded:false,
   treasures:[], skills:[], helped:{}, giftsReceived:0,
   streak:0, bestStreak:0, lastDay:null, todayCount:0, helpToday:0, helpDay:null,
-  magicDay:null, goldTick:0, spBought:0, magicHand:null,
+  magicDay:null, goldTick:0, spBought:0, magicHand:null, absAt:0,
 });
 const blankGru = () => ({
   uid:null, name:DEFAULT_GRU_NAME, ownerName:null, ownerPhoto:null,
@@ -88,7 +88,19 @@ export const state = {
   pending: 0,
 };
 
-const sync = () => { mirrorSave(); emit('state', state); };
+// 絕對欄位一有變動就蓋一個時間戳。多台裝置靠它決定誰比較新。
+// 只有**真的改到那些欄位**才蓋 —— 不然光是讀個名單也會讓這台裝置看起來最新。
+let absFp = '';
+const markAbs = () => { absFp = absFingerprint(state.me); };   // 採用別人的值時用：不算自己改的
+const sync = () => {
+  const fp = absFingerprint(state.me);
+  if (fp !== absFp) {
+    absFp = fp;
+    if (state.me.loaded) state.me.absAt = Date.now();
+  }
+  mirrorSave();
+  emit('state', state);
+};
 
 // 今天還剩多少額度（會自動處理跨日，所以還沒壓之前顯示也是對的）
 export function dailyLeft() {
@@ -371,6 +383,14 @@ async function onSignedIn(user) {
     // 伺服器的數字 ＋ 還沒寫出去的量。直接照抄伺服器的話，
     // 任何一次非 flush 的寫入（買帽子、買外觀、改暱稱、收信箱）都會
     // 推來一份「還沒算進你剛才那些點擊」的快照，畫面就往回跳。
+    // 另一台裝置寫了比較新的絕對欄位 → 跟上它。
+    // 這是「三個地方登入進度不同步」的另一半：不只第一次載入要比，
+    // 開著的分頁也要跟得上別台裝置後來的改動。
+    if (state.me.loaded && (d.absAt || 0) > (state.me.absAt || 0)) {
+      Object.assign(state.me, pickMirror(null, srvAbsolutes(d), false));
+      markAbs();
+    }
+
     // 「哪個值該贏」的規則全部在 planSnapshot() 裡 —— 那是純函式，測得到。
     Object.assign(state.me, planSnapshot({
       prev: state.me, d, gruHat: state.myGru.hat,
@@ -391,6 +411,7 @@ async function onSignedIn(user) {
       const mir = mirrorRead(uid);
       const useMirror = preferMirror(mir, srv);
       Object.assign(state.me, pickMirror(mir, srv, useMirror));
+      markAbs();                   // 剛採用的值不算「這台裝置改的」
       state.me.loaded = true;      // 有了這個，flush() 才會開始寫
       repairStreak();
       repairSkills();

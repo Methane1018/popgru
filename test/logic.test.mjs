@@ -1206,5 +1206,53 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   S.state.me.treasures = []; S.state.me.ownedHats = []; S.state.me.ownedSkins = [];
 }
 
+/* ============ 多台裝置的同步（v0.14.3） ============
+   真實災情：同一個帳號在三個地方登入，進度不同步。
+   只增不減的東西（寶物、技能、裝扮）和用 increment 寫的數字（魚、累計）
+   本來就會同步；不同步的是「絕對值欄位」——
+   preferMirror 用日期字串比新舊，同一天就永遠以本機為準，
+   所以第二台裝置會整組忽略伺服器，再把自己的舊值寫回去蓋掉第一台。      */
+{
+  const P = await import('../js/plan.js');
+  const today = S.dayStr();
+
+  // A 裝置玩過：連勝 9、凍結卡 3，比較晚寫
+  const srv = { ...P.srvAbsolutes({}), streak:9, freezes:3, lastDay:today, absAt: 2000 };
+  // B 裝置：同一天，但停在比較早的狀態
+  const stale = { ...P.srvAbsolutes({}), streak:4, freezes:0, lastDay:today, absAt: 1000 };
+
+  ok('★ 伺服器比較新時要採用伺服器', P.preferMirror(stale, srv) === false,
+     `mirror=${stale.absAt} srv=${srv.absAt}`);
+  const picked = P.pickMirror(stale, srv, P.preferMirror(stale, srv));
+  ok('★ 第二台裝置會拿到第一台的連勝', picked.streak === 9, String(picked.streak));
+  ok('★ 凍結卡也是', picked.freezes === 3, String(picked.freezes));
+
+  // 反過來：本機比較新（剛壓完還沒寫出去）就不能被伺服器拉回去
+  const fresh = { ...P.srvAbsolutes({}), streak:10, freezes:3, lastDay:today, absAt: 3000 };
+  ok('★ 本機比較新時仍然以本機為準', P.preferMirror(fresh, srv) === true);
+  ok('★ 不會被慢一拍的快照拉回去',
+     P.pickMirror(fresh, srv, true).streak === 10);
+
+  // 舊資料（兩邊都還沒有時間戳）要沿用原本的判斷，不能整個壞掉
+  const oldMir = { streak:7, lastDay:today };
+  const oldSrv = { ...P.srvAbsolutes({}), streak:2, lastDay:today };
+  ok('★ 舊資料沿用日期判斷', P.preferMirror(oldMir, oldSrv) === true);
+  ok('★ 伺服器日期比較新的舊資料，採用伺服器',
+     P.preferMirror({ streak:7, lastDay:'2026-01-01' },
+                    { ...P.srvAbsolutes({}), lastDay:today }) === false);
+
+  // absAt 要跟著絕對欄位一起走，不然鏡像存了值卻沒存時間戳
+  ok('★ absAt 算在絕對欄位裡', P.ABSOLUTE_FIELDS.includes('absAt'),
+     P.ABSOLUTE_FIELDS.join(','));
+  ok('★ 伺服器沒有 absAt 時當成 0', P.srvAbsolutes({}).absAt === 0);
+
+  // 指紋：只看真正的絕對欄位，不能把 absAt 自己算進去（會自己一直變新）
+  const a = { streak:1, freezes:0, absAt: 111 };
+  const b = { streak:1, freezes:0, absAt: 999 };
+  ok('★ 只有 absAt 不同時指紋一樣', P.absFingerprint(a) === P.absFingerprint(b));
+  ok('★ 真的改了絕對欄位指紋才會變',
+     P.absFingerprint(a) !== P.absFingerprint({ ...a, streak: 2 }));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

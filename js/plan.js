@@ -49,7 +49,7 @@ export function planFlush({
     streak: me.streak, bestStreak: me.bestStreak, lastDay: me.lastDay,
     todayCount: me.todayCount, helpToday: me.helpToday, helpDay: me.helpDay,
     freezes: me.freezes, double: me.double, magicDay: me.magicDay,
-    goldTick: me.goldTick, magicHand: me.magicHand,
+    goldTick: me.goldTick, magicHand: me.magicHand, absAt: me.absAt,
     ...set,
   };
   for (const [f, v] of Object.entries(inc)) if (v) user[f] = INC(v);
@@ -207,7 +207,16 @@ export function planSnapshot({ prev, d = {}, gruHat = null, pend = {} } = {}) {
 export const ABSOLUTE_FIELDS = [
   'streak','bestStreak','lastDay','todayCount','helpToday','helpDay',
   'freezes','double','magicDay','goldTick','magicHand',
+  // 這一組最後一次被改動的時間（寫的那台裝置的時鐘）。
+  // 多台裝置就是靠它決定「誰比較新」—— 見 preferMirror。
+  'absAt',
 ];
+
+// 絕對欄位的指紋，用來判斷「真的有東西改了嗎」。
+// 不把 absAt 自己算進去，否則它會一直讓指紋改變，變成自己蓋自己。
+export const absFingerprint = me =>
+  ABSOLUTE_FIELDS.filter(f => f !== 'absAt')
+    .map(f => JSON.stringify(me[f] ?? null)).join('|');
 
 export const srvAbsolutes = (d = {}) => ({
   streak:d.streak||0, bestStreak:d.bestStreak||0,
@@ -215,13 +224,23 @@ export const srvAbsolutes = (d = {}) => ({
   helpToday:d.helpToday||0, helpDay:d.helpDay||null,
   freezes:d.freezes||0, double:d.double||0,
   magicDay:d.magicDay||null, goldTick:d.goldTick||0,
-  magicHand:d.magicHand||null,
+  magicHand:d.magicHand||null, absAt:d.absAt||0,
 });
 
-// 本機鏡像只要「不比伺服器舊」就以本機為準。
-// 'YYYY-MM-DD' 直接字串比大小就等於比日期。
-export const preferMirror = (mir, srv) =>
-  !!mir && (mir.lastDay || '') >= (srv.lastDay || '');
+// 本機鏡像跟伺服器，哪一邊的絕對欄位比較新？
+//
+// ⚠️ 本來是比 lastDay（日期字串），那表示**同一天就永遠以本機為準** ——
+// 於是第二台裝置會整組忽略伺服器的連勝／凍結卡／雙倍魚，
+// 再把自己的舊值寫回去蓋掉第一台。「三個地方登入進度不同步」就是這樣來的。
+//
+// 改成比 absAt（那一組欄位最後一次被改動的時間）。
+// 舊資料兩邊都還沒有 absAt，就沿用原本的日期判斷，不會整個壞掉。
+export const preferMirror = (mir, srv) => {
+  if (!mir) return false;
+  const a = Number(mir.absAt) || 0, b = Number((srv || {}).absAt) || 0;
+  if (a || b) return a >= b;
+  return (mir.lastDay || '') >= ((srv || {}).lastDay || '');
+};
 
 /**
  * 從鏡像和伺服器值裡挑出要用的絕對欄位。
