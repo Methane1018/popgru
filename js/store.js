@@ -10,12 +10,12 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillNeeds,
-} from './config.js?v=0.14.9';
+} from './config.js?v=0.15.0';
 import {
   planFlush, planSnapshot, pendingFor, isInc, isUnion, isNow,
   NO_NAME, realName, mergeOwned, mergeCounts, readHelped, absFingerprint,
   pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS,
-} from './plan.js?v=0.14.9';
+} from './plan.js?v=0.15.0';
 // 這幾個是純決策，定義在 plan.js；這裡轉出去讓呼叫端和測試照舊拿得到
 export { mergeOwned, mergeCounts, readHelped, pickMirror };
 
@@ -400,7 +400,7 @@ async function onSignedIn(user) {
 
     // 追「買東西數字亂跳」用的。伺服器的魚一變動就把整條算式印出來 ——
     // 只在真的變動時印，所以不會洗版。問題解決之後要拿掉。
-    if (d.fish !== lastServerFish) {
+    if (DEBUG && d.fish !== lastServerFish) {
       console.log(
         `POPGRU 魚｜伺服器 ${lastServerFish} → ${d.fish}` +
         `｜還沒送出 ${pendNow.fish}／扣款 ${pendNow.inc.fish || 0}` +
@@ -520,6 +520,10 @@ async function claimGuestProgress(uid) {
 }
 
 // 上次關頁沒送出去的點擊，開啟時補送
+// 追蹤用。平常關著，要查帳的時候在主控台打開：
+//   localStorage.setItem('popgru.debug', '1'); location.reload()
+let DEBUG = false;
+try { DEBUG = localStorage.getItem('popgru.debug') === '1'; } catch {}
 let lastServerFish = null;      // 追蹤用：上一次看到的伺服器魚數
 let recoveredFor = null;                 // 同一次登入只補送一次，不然會重複計入
 async function recoverOutbox(uid) {
@@ -1349,17 +1353,20 @@ export async function sendItem(toUid, key, extra = {}, qty = 1) {
     from:state.me.uid, fromName:state.me.name, type:key,
     at:F.serverTimestamp(), read:false, ...(n > 1 ? { qty:n } : {}), ...extra,
   });
-  if (cost > 0) {
-    b.set(userRef(state.me.uid),
-      item.gold ? { goldfish:F.increment(-cost) } : { fish:F.increment(-cost) },
-      { merge:true });
-  }
   await b.commit();
-  // 寫入成功之後才扣本機，畫面才會馬上更新。
-  // 之前完全沒扣，要等快照繞一圈回來，看起來就像「買了但魚沒變」。
-  // 也不能在 commit 之前扣：那樣期間來的快照會拿舊的伺服器值把畫面拉回去。
+  // ⚠️ 扣款一定要走一般的存檔佇列，跟「買給自己」同一條路。
+  //
+  // 本來這裡是自己在批次裡寫 increment(-cost)，commit 之後再扣一次本機 ——
+  // 但 Firestore 在 commit 當下就把 increment 套到本地快取了，快照會把它帶回來。
+  // 所以那次「再扣一次本機」就是扣第二次：
+  //   畫面 -42（快照）→ 又 -42（這行）→ 下一次快照從伺服器重算又 +42 跳回來。
+  // 而且因為沒經過 queueInc，帳面上完全看不到這筆扣款，查了好幾輪都查錯地方。
   if (cost > 0) {
-    if (item.gold) state.me.goldfish -= cost; else state.me.fish -= cost;
+    if (DEBUG) console.log(`POPGRU 送人 ${key} ×${n}｜合計 ${cost}｜送之前 ` +
+      `${item.gold ? state.me.goldfish : state.me.fish}`);
+    if (item.gold) { state.me.goldfish -= cost; queueInc('goldfish', -cost); }
+    else           { state.me.fish     -= cost; queueInc('fish',     -cost); }
+    scheduleFlush();
     sync();
   }
   if (key === 'poke') markPoke(toUid);
@@ -1372,7 +1379,7 @@ export async function buyForSelf(key, qty = 1) {
   const cost = itemCost(key) * n;
   if (me.fish < cost) throw new Error('魚不夠');
 
-  console.log(`POPGRU 買 ${key} ×${n}｜單價 ${itemCost(key)}｜合計 ${cost}｜買之前 ${me.fish}`);
+  if (DEBUG) console.log(`POPGRU 買給自己 ${key} ×${n}｜合計 ${cost}｜買之前 ${me.fish}`);
   me.fish -= cost;
   if (key === 'freeze') me.freezes += n;
   if (key === 'double') me.double  += (TUNING.doubleClicks + buffOf('double')) * n;   // 🌌 星塵

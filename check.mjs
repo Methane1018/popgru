@@ -249,6 +249,27 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
         /warnings\.push\(k\)/.test(plan) && /plan\.warnings\.forEach/.test(store));
 }
 
+// 個人資料的魚／金魚／累計**只能由 flush() 寫**。
+//
+// 自己另外寫一份的話，扣款就不在佇列裡（帳面上完全看不到），
+// 而且 Firestore 在 commit 當下就把 increment 套到本地快取 ——
+// 再自己扣一次本機就是扣兩次。送人道具就是這樣壞掉的（DEVLOG 第 29 條）。
+// 例外只有兩個：登入時寫頭像、以及補算訪客進度（那是一次性的）。
+{
+  const cut = name => {
+    const m = store.match(new RegExp(`(export )?(async )?function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`));
+    return m ? m[0] : '';
+  };
+  let outside = store;
+  for (const fn of ['flush', 'claimGuestProgress', 'onSignedIn']) outside = outside.replace(cut(fn), '');
+  const bad = [];
+  for (const m of outside.matchAll(/set(?:Doc)?\(userRef\(/g)) {
+    const after = outside.slice(m.index, m.index + 220);
+    if (/\b(fish|goldfish|lifetime)\b/.test(after)) bad.push(after.split('\n')[0].trim());
+  }
+  check('只有 flush 會寫個人資料的魚／累計', !bad.length, String(bad));
+}
+
 // 同一個欄位可能同時有「排隊中的扣款」和「這一批賺到的」，一定要相加。
 // 直接指派的話後面那行會蓋掉前面的 —— 扣款就永遠送不出去（DEVLOG 第 26 條）。
 {
