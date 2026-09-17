@@ -87,7 +87,12 @@ const check = (name, ok, detail = '') => {
   // 擋不到這種。有本機鏡像的人會被救回來，清過瀏覽器資料的人直接歸零（DEVLOG 第 30 條）。
   check('第一次載入只信伺服器的快照',
         /if \(ignoreSnapshot\(state\.me\.loaded, s\.metadata\.fromCache\)\) return;/.test(store)
-        && /if \(ignoreSnapshot\(gruLoaded, s\.metadata\.fromCache\)\) return;/.test(store));
+        && /ignoreSnapshot\(gruLoaded, s\.metadata\.fromCache\)/.test(store));
+  // 格魯可以先把有料的快取畫上去（不然裝扮和次數會空等伺服器），
+  // 但「採信」不行 —— setSkin 寫的是整份 skin 物件，採信了半成品就會把
+  // 顏色和字體一起蓋成預設值。所以 gruLoaded 只能在非快取的快照上設。
+  check('格魯先畫後採信', /if \(!cached\) gruLoaded = true;/.test(store)
+        && /if \(cached && !looksComplete\(d, \['squashes', 'name', 'skin'\]\)\) return;/.test(store));
   check('沒有人再用「文件不存在」當防線',
         !/!s\.exists\(\) && s\.metadata\.fromCache/
           .test(store.replace(/^\s*\/\/.*$/gm, '')));

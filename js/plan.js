@@ -157,6 +157,15 @@ export const planDocIds = plan => [
 // 那是對的：沒有連線本來就不該寫入，點擊有待送匣接著，不會掉。
 export const ignoreSnapshot = (loaded, fromCache) => !loaded && !!fromCache;
 
+// 這份快取文件是「真的有資料」還是「剛登入寫出來的半成品」？
+//
+// onSignedIn 為了放頭像會先寫一筆，Firestore 立刻在本地長出一份只有那一兩個
+// 欄位的文件。真正玩過的人，快取裡的文件會有 squashes / name / skin。
+// 分得出來，就能安全地先把舊資料畫上去 —— 畫面不用空等伺服器，
+// 但「採信並寫回去」那條路仍然只認伺服器（見 ignoreSnapshot）。
+export const looksComplete = (d, keys) =>
+  !!d && keys.some(k => d[k] !== undefined && d[k] !== null);
+
 export const NO_NAME = '無名氏';
 export const realName = v =>
   (typeof v === 'string' && v.trim() && v.trim() !== NO_NAME) ? v.trim() : null;

@@ -1093,6 +1093,16 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
     ok('★ 第一次載入只信伺服器', P.ignoreSnapshot(false, false) === false);
     ok('載入過之後快取就無所謂', P.ignoreSnapshot(true, true) === false);
 
+    // 快取裡分得出「剛登入的半成品」和「真的玩過」，才敢先畫上去
+    const 格魯欄位 = ['squashes', 'name', 'skin'];
+    ok('★ 登入半成品不算有料',
+       P.looksComplete({ ownerPhoto: 'x' }, 格魯欄位) === false);
+    ok('★ 玩過的快取算有料',
+       P.looksComplete({ squashes: 6863, name: '格魯' }, 格魯欄位) === true);
+    ok('壓 0 下的新格魯也算有料', P.looksComplete({ name: '格魯' }, 格魯欄位) === true);
+    ok('空文件不算有料', P.looksComplete({}, 格魯欄位) === false);
+    ok('沒有文件不算有料', P.looksComplete(null, 格魯欄位) === false);
+
     // 重現那個危機：剛登入時本地只有 onSignedIn 寫的那三個欄位，
     // 這份「文件存在但幾乎是空的」快照如果被當真，會讀成什麼。
     const 剛登入的假文件 = { photo: 'x', lastSeen: 1, googleName: '甲烷' };

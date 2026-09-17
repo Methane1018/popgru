@@ -10,12 +10,12 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillNeeds,
-} from './config.js?v=0.15.1';
+} from './config.js?v=0.15.2';
 import {
   planFlush, planSnapshot, pendingFor, isInc, isUnion, isNow,
   NO_NAME, realName, mergeOwned, mergeCounts, readHelped, absFingerprint,
-  pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS, ignoreSnapshot,
-} from './plan.js?v=0.15.1';
+  pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS, ignoreSnapshot, looksComplete,
+} from './plan.js?v=0.15.2';
 // 這幾個是純決策，定義在 plan.js；這裡轉出去讓呼叫端和測試照舊拿得到
 export { mergeOwned, mergeCounts, readHelped, pickMirror };
 
@@ -467,9 +467,13 @@ async function onSignedIn(user) {
   unsubGru = F.onSnapshot(gruRef(uid), s => {
     // 同理。格魯的外觀是整份寫回去的（setSkin 會寫 state.myGru.skin），
     // 如果先採用了本地那份「只有頭像」的假文件，外觀會被預設值蓋掉。
-    if (ignoreSnapshot(gruLoaded, s.metadata.fromCache)) return;
-    gruLoaded = true;
+    const cached = ignoreSnapshot(gruLoaded, s.metadata.fromCache);
     const d = s.data() || {};
+    // 快取裡是剛登入寫出來的半成品（只有頭像）就什麼都別做，等伺服器。
+    if (cached && !looksComplete(d, ['squashes', 'name', 'skin'])) return;
+    // 有料的話就先畫上去，讓裝扮和次數不用空等 —— 但不標記 gruLoaded，
+    // 「採信」這件事還是只有伺服器說了算。
+    if (!cached) gruLoaded = true;
     state.myGru = {
       uid, name:d.name||DEFAULT_GRU_NAME, ownerName:d.ownerName||state.me.name,
       ownerPhoto:d.ownerPhoto||state.me.photo, hat:d.hat||null,
