@@ -176,31 +176,20 @@ export const readHelped = d => {
 /**
  * 這一份快照上面，還要補多少「本機知道、但它還沒算到」的量。
  *
- * ⚠️ Firestore 會**本地先套用**：寫入一送出，本地快取就立刻把 increment 算進去，
- * 並馬上推一份 `hasPendingWrites = true` 的快照。
- * 那份快照**已經含了送出中的那一批**，我們再加一次就是重複計算 ——
- * 花 1000 條魚會先顯示扣了 2000，然後才跳回正確值。
- * 平常一次只賺 1 條魚看不出來，一次花一大筆就很明顯。
+ * 答案是：**只補還沒送出的那些。送出中的那一批一律不補。**
  *
- *   hasPendingWrites = true  → 只補「還沒送出」的
- *   hasPendingWrites = false → 送出中的那批也要補（伺服器還沒收到）
+ * ⚠️ Firestore 在 `commit()` 被呼叫的那一刻就把 increment 套用到本地快取了，
+ * 所以從那一刻起，快照裡的值**永遠已經含了送出中的那批**。再加一次就是扣兩次。
+ *
+ * v0.14.6 曾經想用 `hasPendingWrites` 來分辨，但那個旗標在「伺服器確認」時就變成
+ * false，而我們的 `commit()` promise 要更晚才 resolve —— 中間那個窗口
+ * （伺服器已經扣過了，而我們手上還留著那筆）就會扣兩次。
+ * 症狀：買一張 42 的凍結卡，魚先 −42、再 −42，過一下才 +42 跳回來。
+ *
+ * 所以不要試圖判斷「伺服器收到了沒」—— 本地快取一定算過了，就是不要再加。
  */
-export function pendingFor({
-  pending = 0, fish = 0, gold = 0, inc = {},
-  inflight = { n:0, fish:0, gold:0 }, inflightInc = {},
-  hasPendingWrites = false,
-} = {}) {
-  const addInflight = !hasPendingWrites;
-  const out = {
-    n:    pending + (addInflight ? (inflight.n    || 0) : 0),
-    fish: fish    + (addInflight ? (inflight.fish || 0) : 0),
-    gold: gold    + (addInflight ? (inflight.gold || 0) : 0),
-    inc:  { ...inc },
-  };
-  if (addInflight) {
-    for (const [f, v] of Object.entries(inflightInc || {})) out.inc[f] = (out.inc[f] || 0) + v;
-  }
-  return out;
+export function pendingFor({ pending = 0, fish = 0, gold = 0, inc = {} } = {}) {
+  return { n: pending, fish, gold, inc: { ...inc } };
 }
 
 /**

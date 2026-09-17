@@ -10,12 +10,12 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillNeeds,
-} from './config.js?v=0.14.7';
+} from './config.js?v=0.14.8';
 import {
   planFlush, planSnapshot, pendingFor, isInc, isUnion, isNow,
   NO_NAME, realName, mergeOwned, mergeCounts, readHelped, absFingerprint,
   pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS,
-} from './plan.js?v=0.14.7';
+} from './plan.js?v=0.14.8';
 // 這幾個是純決策，定義在 plan.js；這裡轉出去讓呼叫端和測試照舊拿得到
 export { mergeOwned, mergeCounts, readHelped, pickMirror };
 
@@ -392,10 +392,10 @@ async function onSignedIn(user) {
     }
 
     // 「哪個值該贏」的規則全部在 planSnapshot() 裡 —— 那是純函式，測得到。
+    // 只補「還沒送出」的。送出中的那批不補 —— Firestore 在 commit() 的那一刻
+    // 就把它套用到本地快取了，快照裡已經有了（DEVLOG 第 28 條）。
     const pendNow = pendingFor({
-      pending: state.pending, fish: pendFish, gold: pendGold,
-      inc: pendInc, inflight, inflightInc,
-      hasPendingWrites: s.metadata.hasPendingWrites,
+      pending: state.pending, fish: pendFish, gold: pendGold, inc: pendInc,
     });
     // 魚／金魚不可能是負的。一旦出現就代表某一邊的帳算錯了 ——
     // 與其讓人看到 -993 卻查不出原因，不如當場把所有輸入印出來。
@@ -407,7 +407,7 @@ async function onSignedIn(user) {
           `POPGRU ${f} 算出來是負的（${got}）——這是 bug，請把下面整段回報\n` +
           `  伺服器=${d[f] || 0}  還沒送出=${pendNow[key] || 0}  排隊中的增減=${pendNow.inc[f] || 0}\n` +
           `  快照來源=${s.metadata.fromCache ? '快取' : '伺服器'} ` +
-          `送出中=${s.metadata.hasPendingWrites}\n` +
+          `本地已套用未確認的寫入=${s.metadata.hasPendingWrites}\n` +
           `  送出中那批=${JSON.stringify(inflight)} ${JSON.stringify(inflightInc)}\n` +
           `  還沒送的=${JSON.stringify(pendBy)} ${JSON.stringify(pendInc)}`);
       }
@@ -1027,7 +1027,7 @@ export const starterHats = () => SKINS.hat.filter(h => h.cost > 0 && !h.need);
 // 你連壓 20 秒畫面完全不動，然後突然跳一大格。里程碑進度條也跟著卡住。
 // 個人累計老早就是這樣算的（v0.9），小圈子總數卻一直漏掉。
 export const globalNow = () =>
-  state.global.squashes + state.pending + inflight.n;
+  state.global.squashes + state.pending;   // 送出中的那批本地快取已經算過了
 
 // 🕵️ 情報網：每幫過一個不同的人，掉落機率 +2%，最多 +20%。
 // 這是交會節點，所以它同時吃社交和探寶兩邊的投資 —— 數值本身不大，

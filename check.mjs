@@ -69,10 +69,14 @@ const check = (name, ok, detail = '') => {
   check('快照會加回未寫出的量',
         /lifetime: \(d\.lifetime\|\|0\) \+ \(pend\.n\|\|0\)/.test(plan)
         && /pending: state\.pending, fish: pendFish/.test(store));
-  // Firestore 會本地先套用：那份快照已經含了送出中的那批，再補一次就是算兩次
-  check('分得出快照含不含送出中的那批',
-        /hasPendingWrites: s\.metadata\.hasPendingWrites/.test(store)
-        && /const addInflight = !hasPendingWrites;/.test(plan));
+  // Firestore 在 commit() 那一刻就把 increment 套到本地快取，
+  // 所以快照永遠已經含了送出中的那批 —— 一律不補，補了就是扣兩次
+  check('送出中的那批不補進快照',
+        /pending: state\.pending, fish: pendFish, gold: pendGold, inc: pendInc,/.test(store));
+  check('pendingFor 不吃 inflight', !/inflight/.test(
+        (plan.match(/export function pendingFor[\s\S]*?\n\}/) || [''])[0]));
+  check('小圈子總數也不補送出中的那批',
+        /state\.global\.squashes \+ state\.pending;/.test(store));
   check('載入時會先用本機備份墊畫面', /if \(prefillFromMirror\(\)\)/.test(store));
   // Firestore 第一份快照可能來自空的本機快取。把它當真就會把資料讀成 0
   // 再寫回伺服器，真資料就沒了 —— 這是連勝歸零的真正原因。
@@ -296,7 +300,7 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
 // 而且解鎖判定要跟畫面用同一個數字，不然會出現「進度條說到了但東西還鎖著」。
 {
   check('有 globalNow 把待送量加進去',
-        /export const globalNow[\s\S]{0,160}state\.pending \+ inflight\.n/.test(store));
+        /export const globalNow[\s\S]{0,160}state\.pending/.test(store));
   check('畫面用 globalNow', /S\.globalNow\(\)/.test(app));
   check('解鎖判定也用 globalNow',
         /hatInfo\(e\)\.need > globalNow\(\)/.test(store)
@@ -354,9 +358,7 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
           snapLines.some(l => l.trim().startsWith(f + ':') && l.includes(`inc('${f}')`)),
           snapLines.length + ' 行有 inc(');
   }
-  check('送出中的扣款由 pendingFor 決定要不要算',
-        /inc: pendInc, inflight, inflightInc/.test(store)
-        && /export function pendingFor/.test(plan));
+  check('有 pendingFor 決定要補什麼', /export function pendingFor/.test(plan));
   // 花錢一律走佇列。自己另外 setDoc 的話扣款就不在 pendInc 裡，畫面照樣退錢。
   const writes = [...store.matchAll(/F\.setDoc\(userRef\(/g)].length;
   check('只有登入那一次直接寫 users', writes === 1, `有 ${writes} 處`);
