@@ -1,7 +1,7 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.14.4';
+import * as S from './store.js?v=0.14.5';
 import {
   TUNING, ITEMS, MILESTONES, HATS, clampQty,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
@@ -9,7 +9,7 @@ import {
   TREASURES, RARITY, SOURCE_LABEL, EGG_TAG, tagOf, treasureHow,
   SKILLS, AXES, CROSS, SP_STEPS, skillNeeds,
   TREE_COLS, TREE_ROWS, SKILL_ROOT, treeEdges, treePos,
-} from './config.js?v=0.14.4';
+} from './config.js?v=0.14.5';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 

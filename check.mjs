@@ -241,6 +241,18 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
         /warnings\.push\(k\)/.test(plan) && /plan\.warnings\.forEach/.test(store));
 }
 
+// 同一個欄位可能同時有「排隊中的扣款」和「這一批賺到的」，一定要相加。
+// 直接指派的話後面那行會蓋掉前面的 —— 扣款就永遠送不出去（DEVLOG 第 26 條）。
+{
+  check('增減用累加不用指派', /const addInc = \(f, v\) =>/.test(plan));
+  // 註解裡有把錯誤寫法當反例，掃描前要先拿掉，不然自己抓自己
+  const planNoComment = plan.replace(/^\s*\/\/.*$/gm, '');
+  const direct = ['lifetime', 'fish', 'goldfish']
+    .filter(f => new RegExp(`user\\.${f}\\s*=\\s*INC\\(`).test(planNoComment));
+  check('沒有直接指派 INC 蓋掉別人', !direct.length, `${direct} 應該走 addInc`);
+  check('抵銷後不留空欄位', /else delete user\[f\];/.test(plan));
+}
+
 // ⚠️ set(..., {merge:true}) 不會把點號當成欄位路徑（只有 update() 會）。
 // 寫 p['helped.' + uid] 會在伺服器上長出一個名字裡有點的頂層欄位，
 // 而 helped 那個 map 永遠是空的 —— 「幫過三個人」的成就因此永遠達不成。

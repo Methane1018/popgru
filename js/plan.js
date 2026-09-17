@@ -52,7 +52,18 @@ export function planFlush({
     goldTick: me.goldTick, magicHand: me.magicHand, absAt: me.absAt,
     ...set,
   };
-  for (const [f, v] of Object.entries(inc)) if (v) user[f] = INC(v);
+  // ⚠️ 同一個欄位可能同時有「排隊中的扣款」和「這一批賺到的」。
+  // 一定要相加 —— 本來是直接指派，後面那行 `user.fish = INC(fish)`
+  // 會把前面排隊的扣款整個蓋掉：在自己家壓（賺魚）＋ 買東西（扣魚）落在同一批時，
+  // 伺服器只收到「賺到的」，扣款從來沒送出去，於是魚永遠用不完。
+  // 道具是絕對值欄位、走另一條路，所以照樣拿到 —— 症狀就是「魚退回來但道具有拿到」。
+  const addInc = (f, v) => {
+    if (!v) return;
+    const sum = (isInc(user[f]) ? user[f].__inc : 0) + v;
+    if (sum) user[f] = INC(sum);
+    else delete user[f];          // 剛好抵銷就不用寫這個欄位
+  };
+  for (const [f, v] of Object.entries(inc)) addInc(f, v);
   for (const [f, s] of Object.entries(uni)) {
     const a = Array.from(s || []);
     if (a.length) user[f] = UNION(...a);
@@ -70,9 +81,9 @@ export function planFlush({
   if (me.skills?.length)    user.skills    = UNION(...me.skills);
   if (me.treasures?.length) user.treasures = UNION(...me.treasures);
 
-  if (n)    user.lifetime = INC(n);
-  if (fish) user.fish     = INC(fish);
-  if (gold) user.goldfish = INC(gold);
+  addInc('lifetime', n);
+  addInc('fish', fish);
+  addInc('goldfish', gold);
 
   const grus = [], visits = [];
   let globalAdd = 0;

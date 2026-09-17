@@ -1300,5 +1300,45 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
   S.state.viewing = { ...S.state.myGru, isMine:true };
 }
 
+/* ======== 同一批裡「賺到的」和「花掉的」會互相覆蓋（v0.14.5） ========
+   真實災情：在自己家壓、同時買東西，魚被退回來但道具有拿到。
+   planFlush 先把排隊中的扣款寫進 user.fish，
+   後面那行 `if (fish) user.fish = INC(fish)` 又整個蓋掉 ——
+   伺服器只收到「賺到的」，扣款從來沒送出去。
+   道具是絕對值欄位、走另一條路，所以照樣拿到。                        */
+{
+  const P = await import('../js/plan.js');
+  const me = { uid:'me', name:'我', photo:null, streak:1, bestStreak:1, lastDay:null,
+               todayCount:0, helpToday:0, helpDay:null, freezes:0, double:0,
+               magicDay:null, goldTick:0, magicHand:null, absAt:0, skills:[], treasures:[] };
+
+  // 壓了 12 下賺 12 條魚，同時買了 60 條魚的凍結卡
+  const r = P.planFlush({ me, n:12, fish:12, target:'me', inc:{ fish:-60 }, now:1 });
+  ok('★ 賺到的和花掉的要相加，不是互相覆蓋',
+     P.isInc(r.user.fish) && r.user.fish.__inc === -48, JSON.stringify(r.user.fish));
+
+  // 金魚同理：買圖鑑寶物的同時剛好掉了一條
+  const g = P.planFlush({ me, n:1, gold:1, target:'me', inc:{ goldfish:-12 }, now:1 });
+  ok('★ 金魚也要相加', g.user.goldfish.__inc === -11, JSON.stringify(g.user.goldfish));
+
+  // 累計也一樣（以後如果有東西會扣累計）
+  const l = P.planFlush({ me, n:5, target:'me', inc:{ lifetime:-2 }, now:1 });
+  ok('★ 累計也要相加', l.user.lifetime.__inc === 3, JSON.stringify(l.user.lifetime));
+
+  // 只有其中一邊時要照舊
+  const onlyEarn = P.planFlush({ me, n:3, fish:3, target:'me', now:1 });
+  ok('只賺沒花時就是賺到的', onlyEarn.user.fish.__inc === 3, JSON.stringify(onlyEarn.user.fish));
+  const onlySpend = P.planFlush({ me, inc:{ fish:-60 }, now:1 });
+  ok('只花沒賺時就是花掉的', onlySpend.user.fish.__inc === -60, JSON.stringify(onlySpend.user.fish));
+
+  // 剛好抵銷時不要留下一個 0（沒必要的寫入）
+  const zero = P.planFlush({ me, n:1, fish:60, target:'me', inc:{ fish:-60 }, now:1 });
+  ok('★ 剛好抵銷就不用寫這個欄位', !('fish' in zero.user), JSON.stringify(zero.user.fish));
+
+  // 其他欄位不受影響
+  ok('別的排隊欄位照舊',
+     P.planFlush({ me, inc:{ medals:2 }, now:1 }).user.medals.__inc === 2);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
