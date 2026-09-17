@@ -68,7 +68,11 @@ const check = (name, ok, detail = '') => {
   check('flush 結束會清掉 inflight', /inflight = \{ n:0, fish:0, gold:0 \};[\s\S]{0,120}scheduleFlush/.test(store));
   check('快照會加回未寫出的量',
         /lifetime: \(d\.lifetime\|\|0\) \+ \(pend\.n\|\|0\)/.test(plan)
-        && /n:\s*state\.pending \+ inflight\.n/.test(store));
+        && /pending: state\.pending, fish: pendFish/.test(store));
+  // Firestore 會本地先套用：那份快照已經含了送出中的那批，再補一次就是算兩次
+  check('分得出快照含不含送出中的那批',
+        /hasPendingWrites: s\.metadata\.hasPendingWrites/.test(store)
+        && /const addInflight = !hasPendingWrites;/.test(plan));
   check('載入時會先用本機備份墊畫面', /if \(prefillFromMirror\(\)\)/.test(store));
   // Firestore 第一份快照可能來自空的本機快取。把它當真就會把資料讀成 0
   // 再寫回伺服器，真資料就沒了 —— 這是連勝歸零的真正原因。
@@ -350,8 +354,9 @@ check('待送匣：能讀舊格式', store.includes('if (!o.items && o.target)')
           snapLines.some(l => l.trim().startsWith(f + ':') && l.includes(`inc('${f}')`)),
           snapLines.length + ' 行有 inc(');
   }
-  check('排隊中與送出中的扣款都算進去', /const pendIncAll = \(\)/.test(store)
-        && /inc:\s*pendIncAll\(\)/.test(store));
+  check('送出中的扣款由 pendingFor 決定要不要算',
+        /inc: pendInc, inflight, inflightInc/.test(store)
+        && /export function pendingFor/.test(plan));
   // 花錢一律走佇列。自己另外 setDoc 的話扣款就不在 pendInc 裡，畫面照樣退錢。
   const writes = [...store.matchAll(/F\.setDoc\(userRef\(/g)].length;
   check('只有登入那一次直接寫 users', writes === 1, `有 ${writes} 處`);

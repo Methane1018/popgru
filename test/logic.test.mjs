@@ -1340,5 +1340,45 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
      P.planFlush({ me, inc:{ medals:2 }, now:1 }).user.medals.__inc === 2);
 }
 
+/* ======== 送出中的那批不能算兩次（v0.14.6） ========
+   真實災情：2500 買 1000 → 顯示 500（扣了兩次）→ 才跳回 1500。
+   Firestore 會本地先套用：寫入一送出，本地快取就把 increment 算進去，
+   並推一份 hasPendingWrites=true 的快照 —— 那份已經含了送出中的那批。 */
+{
+  const P = await import('../js/plan.js');
+  const args = {
+    pending: 0, fish: 0, gold: 0, inc: {},
+    inflight: { n:3, fish:3, gold:0 }, inflightInc: { fish:-1000 },
+  };
+
+  const acked = P.pendingFor({ ...args, hasPendingWrites: false });
+  ok('★ 伺服器還沒收到時，送出中的那批要補上', acked.fish === 3 && acked.inc.fish === -1000,
+     JSON.stringify(acked));
+
+  const pendingWrite = P.pendingFor({ ...args, hasPendingWrites: true });
+  ok('★ 快照已經含了那批時就不能再補', pendingWrite.fish === 0,
+     JSON.stringify(pendingWrite));
+  ok('★ 扣款也一樣不能再補一次', !pendingWrite.inc.fish, JSON.stringify(pendingWrite.inc));
+
+  // 還沒送出的那些，兩種情況都要補
+  const both = P.pendingFor({ pending: 5, fish: 5, inc: { fish:-60 },
+                              inflight: { n:2, fish:2, gold:0 }, inflightInc: { fish:-1000 },
+                              hasPendingWrites: true });
+  ok('★ 還沒送出的照樣要補', both.fish === 5 && both.inc.fish === -60, JSON.stringify(both));
+  ok('★ 但送出中的不補', both.n === 5, String(both.n));
+
+  // 端對端：使用者那組數字
+  const snapshotFish = (serverFish, p) => serverFish + p.fish + (p.inc.fish || 0);
+  // 買了 1000，還沒送出：伺服器 2500
+  ok('★ 買完還沒送出時顯示 1500',
+     snapshotFish(2500, P.pendingFor({ inc:{ fish:-1000 }, hasPendingWrites:false })) === 1500);
+  // 送出中：本地快取已經是 2500-1000=1500
+  ok('★ 送出中顯示 1500（不是 500）',
+     snapshotFish(1500, P.pendingFor({ inflightInc:{ fish:-1000 }, hasPendingWrites:true })) === 1500);
+  // 伺服器確認：1500
+  ok('★ 確認之後還是 1500',
+     snapshotFish(1500, P.pendingFor({ hasPendingWrites:false })) === 1500);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

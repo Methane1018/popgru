@@ -174,6 +174,36 @@ export const readHelped = d => {
 };
 
 /**
+ * 這一份快照上面，還要補多少「本機知道、但它還沒算到」的量。
+ *
+ * ⚠️ Firestore 會**本地先套用**：寫入一送出，本地快取就立刻把 increment 算進去，
+ * 並馬上推一份 `hasPendingWrites = true` 的快照。
+ * 那份快照**已經含了送出中的那一批**，我們再加一次就是重複計算 ——
+ * 花 1000 條魚會先顯示扣了 2000，然後才跳回正確值。
+ * 平常一次只賺 1 條魚看不出來，一次花一大筆就很明顯。
+ *
+ *   hasPendingWrites = true  → 只補「還沒送出」的
+ *   hasPendingWrites = false → 送出中的那批也要補（伺服器還沒收到）
+ */
+export function pendingFor({
+  pending = 0, fish = 0, gold = 0, inc = {},
+  inflight = { n:0, fish:0, gold:0 }, inflightInc = {},
+  hasPendingWrites = false,
+} = {}) {
+  const addInflight = !hasPendingWrites;
+  const out = {
+    n:    pending + (addInflight ? (inflight.n    || 0) : 0),
+    fish: fish    + (addInflight ? (inflight.fish || 0) : 0),
+    gold: gold    + (addInflight ? (inflight.gold || 0) : 0),
+    inc:  { ...inc },
+  };
+  if (addInflight) {
+    for (const [f, v] of Object.entries(inflightInc || {})) out.inc[f] = (out.inc[f] || 0) + v;
+  }
+  return out;
+}
+
+/**
  * 每次快照都要重算的欄位。
  *
  * @param prev    現在的 state.me

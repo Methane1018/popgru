@@ -10,12 +10,12 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillNeeds,
-} from './config.js?v=0.14.5';
+} from './config.js?v=0.14.6';
 import {
-  planFlush, planSnapshot, isInc, isUnion, isNow,
+  planFlush, planSnapshot, pendingFor, isInc, isUnion, isNow,
   NO_NAME, realName, mergeOwned, mergeCounts, readHelped, absFingerprint,
   pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS,
-} from './plan.js?v=0.14.5';
+} from './plan.js?v=0.14.6';
 // 這幾個是純決策，定義在 plan.js；這裡轉出去讓呼叫端和測試照舊拿得到
 export { mergeOwned, mergeCounts, readHelped, pickMirror };
 
@@ -394,12 +394,13 @@ async function onSignedIn(user) {
     // 「哪個值該贏」的規則全部在 planSnapshot() 裡 —— 那是純函式，測得到。
     Object.assign(state.me, planSnapshot({
       prev: state.me, d, gruHat: state.myGru.hat,
-      pend: {
-        n:    state.pending + inflight.n,
-        fish: pendFish      + inflight.fish,
-        gold: pendGold      + inflight.gold,
-        inc:  pendIncAll(),
-      },
+      // hasPendingWrites 代表這份快照已經含了我們送出中、伺服器還沒確認的那批。
+      // 那時候不能再補一次，否則會重複計算（DEVLOG 第 27 條）。
+      pend: pendingFor({
+        pending: state.pending, fish: pendFish, gold: pendGold,
+        inc: pendInc, inflight, inflightInc,
+        hasPendingWrites: s.metadata.hasPendingWrites,
+      }),
     }));
 
     // 下面這些是「絕對值」欄位，只有這台裝置在寫，而快照永遠比本機慢一拍。
