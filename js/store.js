@@ -10,12 +10,12 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillNeeds,
-} from './config.js?v=0.14.8';
+} from './config.js?v=0.14.9';
 import {
   planFlush, planSnapshot, pendingFor, isInc, isUnion, isNow,
   NO_NAME, realName, mergeOwned, mergeCounts, readHelped, absFingerprint,
   pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS,
-} from './plan.js?v=0.14.8';
+} from './plan.js?v=0.14.9';
 // 這幾個是純決策，定義在 plan.js；這裡轉出去讓呼叫端和測試照舊拿得到
 export { mergeOwned, mergeCounts, readHelped, pickMirror };
 
@@ -397,6 +397,19 @@ async function onSignedIn(user) {
     const pendNow = pendingFor({
       pending: state.pending, fish: pendFish, gold: pendGold, inc: pendInc,
     });
+
+    // 追「買東西數字亂跳」用的。伺服器的魚一變動就把整條算式印出來 ——
+    // 只在真的變動時印，所以不會洗版。問題解決之後要拿掉。
+    if (d.fish !== lastServerFish) {
+      console.log(
+        `POPGRU 魚｜伺服器 ${lastServerFish} → ${d.fish}` +
+        `｜還沒送出 ${pendNow.fish}／扣款 ${pendNow.inc.fish || 0}` +
+        `｜送出中 ${inflight.fish}／扣款 ${inflightInc.fish || 0}` +
+        `｜來源 ${s.metadata.fromCache ? '快取' : '伺服器'}` +
+        `｜本地未確認 ${s.metadata.hasPendingWrites}` +
+        `｜算出 ${(d.fish || 0) + pendNow.fish + (pendNow.inc.fish || 0)}`);
+      lastServerFish = d.fish;
+    }
     // 魚／金魚不可能是負的。一旦出現就代表某一邊的帳算錯了 ——
     // 與其讓人看到 -993 卻查不出原因，不如當場把所有輸入印出來。
     for (const f of ['fish', 'goldfish']) {
@@ -507,6 +520,7 @@ async function claimGuestProgress(uid) {
 }
 
 // 上次關頁沒送出去的點擊，開啟時補送
+let lastServerFish = null;      // 追蹤用：上一次看到的伺服器魚數
 let recoveredFor = null;                 // 同一次登入只補送一次，不然會重複計入
 async function recoverOutbox(uid) {
   if (recoveredFor === uid) return;
@@ -1358,6 +1372,7 @@ export async function buyForSelf(key, qty = 1) {
   const cost = itemCost(key) * n;
   if (me.fish < cost) throw new Error('魚不夠');
 
+  console.log(`POPGRU 買 ${key} ×${n}｜單價 ${itemCost(key)}｜合計 ${cost}｜買之前 ${me.fish}`);
   me.fish -= cost;
   if (key === 'freeze') me.freezes += n;
   if (key === 'double') me.double  += (TUNING.doubleClicks + buffOf('double')) * n;   // 🌌 星塵
