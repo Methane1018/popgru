@@ -139,6 +139,24 @@ export const planDocIds = plan => [
 // 這個判斷以前埋在 onSnapshot 的回呼裡，而那需要連線才跑得動 ——
 // v0.11.2 / 0.11.3 / 0.11.4 有一半的成因就藏在下面這些規則裡。
 
+// 第一次載入時，這份快照能不能當真？
+//
+// ⚠️ **不能相信任何來自快取的第一份快照。**
+//
+// 剛登入時我們會先寫一筆 {photo, lastSeen, googleName}，
+// Firestore 立刻在本地建出一份**只有那三個欄位**的文件，
+// 並推一份 fromCache=true、exists=true 的快照 ——
+// 連勝、凍結卡、雙倍魚在那份裡全是 0（欄位根本不存在）。
+//
+// 舊的判斷是「文件不存在 ＋ 來自快取」才忽略，所以這種「存在但幾乎是空的」
+// 會被當成真的伺服器資料。有本機鏡像的人會被鏡像救回來，
+// 但**清過瀏覽器資料的人沒有鏡像** —— 那份 0 會被採用，然後寫回伺服器，
+// 連勝和道具就真的沒了。
+//
+// 所以第一次載入只認伺服器來的快照。離線的話就一直不 loaded ——
+// 那是對的：沒有連線本來就不該寫入，點擊有待送匣接著，不會掉。
+export const ignoreSnapshot = (loaded, fromCache) => !loaded && !!fromCache;
+
 export const NO_NAME = '無名氏';
 export const realName = v =>
   (typeof v === 'string' && v.trim() && v.trim() !== NO_NAME) ? v.trim() : null;

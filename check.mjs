@@ -82,10 +82,15 @@ const check = (name, ok, detail = '') => {
   // 再寫回伺服器，真資料就沒了 —— 這是連勝歸零的真正原因。
   // 只能擋「空的」快取快照。擋掉所有快取快照會讓正常資料也進不來，
   // 結果 state.viewing.uid 一直是 null，寫入對象變成 null。
-  check('個人資料只擋空的快取快照',
-        /if \(!state\.me\.loaded && !s\.exists\(\) && s\.metadata\.fromCache\) return;/.test(store));
-  check('格魯只擋空的快取快照',
-        /if \(!gruLoaded && !s\.exists\(\) && s\.metadata\.fromCache\) return;/.test(store));
+  // 第一次載入只能信伺服器來的快照。剛登入時本地會先長出一份「只有頭像那三個欄位」
+  // 的文件，它 exists=true 但連勝／凍結卡／雙倍魚全是 0。舊的判斷擋的是「文件不存在」，
+  // 擋不到這種。有本機鏡像的人會被救回來，清過瀏覽器資料的人直接歸零（DEVLOG 第 30 條）。
+  check('第一次載入只信伺服器的快照',
+        /if \(ignoreSnapshot\(state\.me\.loaded, s\.metadata\.fromCache\)\) return;/.test(store)
+        && /if \(ignoreSnapshot\(gruLoaded, s\.metadata\.fromCache\)\) return;/.test(store));
+  check('沒有人再用「文件不存在」當防線',
+        !/!s\.exists\(\) && s\.metadata\.fromCache/
+          .test(store.replace(/^\s*\/\/.*$/gm, '')));
   check('在自己家時寫入對象用自己的 uid',
         /const targetUid = v\.isMine \? \(state\.me\.uid \|\| v\.uid\) : v\.uid;/.test(store));
   // 待送量和待送匣要用同一個 key 記。不同的話，結清時會找不到那一筆，

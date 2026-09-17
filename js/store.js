@@ -10,12 +10,12 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillNeeds,
-} from './config.js?v=0.15.0';
+} from './config.js?v=0.15.1';
 import {
   planFlush, planSnapshot, pendingFor, isInc, isUnion, isNow,
   NO_NAME, realName, mergeOwned, mergeCounts, readHelped, absFingerprint,
-  pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS,
-} from './plan.js?v=0.15.0';
+  pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS, ignoreSnapshot,
+} from './plan.js?v=0.15.1';
 // 這幾個是純決策，定義在 plan.js；這裡轉出去讓呼叫端和測試照舊拿得到
 export { mergeOwned, mergeCounts, readHelped, pickMirror };
 
@@ -368,12 +368,10 @@ async function onSignedIn(user) {
 
   unsubUser?.();
   unsubUser = F.onSnapshot(userRef(uid), s => {
-    // 只忽略「空的快取快照」。
-    // 危險的只有『文件不存在 + 來自快取』這一種：那代表我們還不知道伺服器上有什麼，
-    // 把它當真就會把資料讀成 0 再寫回去。快取裡「有資料」的快照是安全的
-    // —— 那些資料本來就是從伺服器來的。
-    // （上一版擋掉所有快取快照，結果連正常的資料都進不來。）
-    if (!state.me.loaded && !s.exists() && s.metadata.fromCache) return;
+    // 第一次載入只認伺服器來的快照。理由見 plan.js 的 ignoreSnapshot ——
+    // 簡單說：剛登入時本地會先長出一份「只有頭像那幾個欄位」的假文件，
+    // 把它當真就會把連勝和道具讀成 0 再寫回伺服器。
+    if (ignoreSnapshot(state.me.loaded, s.metadata.fromCache)) return;
 
     const d = s.data() || {};
     const first = !state.me.loaded;
@@ -467,7 +465,9 @@ async function onSignedIn(user) {
   unsubGru?.();
   let gruLoaded = false;
   unsubGru = F.onSnapshot(gruRef(uid), s => {
-    if (!gruLoaded && !s.exists() && s.metadata.fromCache) return;   // 同理，只擋空的快取快照
+    // 同理。格魯的外觀是整份寫回去的（setSkin 會寫 state.myGru.skin），
+    // 如果先採用了本地那份「只有頭像」的假文件，外觀會被預設值蓋掉。
+    if (ignoreSnapshot(gruLoaded, s.metadata.fromCache)) return;
     gruLoaded = true;
     const d = s.data() || {};
     state.myGru = {

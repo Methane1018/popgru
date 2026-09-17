@@ -1087,6 +1087,27 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
     ok('沒有鏡像就用伺服器', P.preferMirror(null, srv) === false);
   }
 
+  // ── 清過瀏覽器資料的人（DEVLOG 第 30 條）──
+  {
+    ok('★ 第一次載入不信快取', P.ignoreSnapshot(false, true) === true);
+    ok('★ 第一次載入只信伺服器', P.ignoreSnapshot(false, false) === false);
+    ok('載入過之後快取就無所謂', P.ignoreSnapshot(true, true) === false);
+
+    // 重現那個危機：剛登入時本地只有 onSignedIn 寫的那三個欄位，
+    // 這份「文件存在但幾乎是空的」快照如果被當真，會讀成什麼。
+    const 剛登入的假文件 = { photo: 'x', lastSeen: 1, googleName: '甲烷' };
+    const 假的 = P.srvAbsolutes(剛登入的假文件);
+    ok('★ 假文件讀出來全是 0', 假的.streak === 0 && 假的.freezes === 0 && 假的.double === 0);
+
+    // 有鏡像的人（開發者自己）被鏡像救了，所以一直沒發現。
+    const 鏡像 = { streak: 12, freezes: 426, double: 21503, absAt: 999 };
+    ok('有鏡像的人會被救回來',
+       P.pickMirror(鏡像, 假的, P.preferMirror(鏡像, 假的)).freezes === 426);
+    // 清過快取的人沒有鏡像 —— 所以唯一的防線是根本不看這份快照。
+    ok('★ 沒鏡像的人只剩這道防線',
+       P.pickMirror(null, 假的, P.preferMirror(null, 假的)).freezes === 0);
+  }
+
   // ── 純度 ──
   {
     const a = JSON.stringify(snap({ lifetime: 5 }));
