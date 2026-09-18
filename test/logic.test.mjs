@@ -1102,6 +1102,34 @@ S.state.me.skills = []; S.state.me.treasures = []; S.state.me.lifetime = 0;
     ok('壓 0 下的新格魯也算有料', P.looksComplete({ name: '格魯' }, 格魯欄位) === true);
     ok('空文件不算有料', P.looksComplete({}, 格魯欄位) === false);
     ok('沒有文件不算有料', P.looksComplete(null, 格魯欄位) === false);
+  }
+
+  // ── 買東西的扣款要撐過重整（DEVLOG 第 31 條）──
+  {
+    // 送人一份 42 條魚的禮物：信箱立刻寫出去，扣款卻只排在佇列裡。
+    let 待送匣 = P.planOutboxInc(null, 'me', { fish: -42 });
+    ok('★ 扣款會落地', 待送匣.inc.fish === -42);
+
+    // 送出失敗 → 那批退回佇列 → 再存一次。
+    // 這裡如果是累加而不是存快照，扣款就變成兩倍。
+    待送匣 = P.planOutboxInc(待送匣, 'me', { fish: -42 });
+    ok('★ 失敗退回來不會變兩倍', 待送匣.inc.fish === -42);
+
+    // 送出成功 → 佇列空了 → 增減區要整個消失，不然重整會再扣一次。
+    待送匣 = P.planOutboxInc(待送匣, 'me', {});
+    ok('★ 送成功就不留帳', 待送匣.inc === undefined);
+
+    // 0 不該留在裡面（留著的話待送匣永遠刪不掉）
+    ok('抵銷掉的欄位不留', P.planOutboxInc(null, 'me', { fish: 0 }).inc === undefined);
+
+    // 待送的點擊不能被增減區弄丟
+    const 有點擊 = { uid:'me', items:{ friend:{ n:5, fish:10, gold:0 } } };
+    ok('★ 存扣款不會弄丟待送的點擊',
+       P.planOutboxInc(有點擊, 'me', { fish:-42 }).items.friend.n === 5);
+
+    // 換帳號就重來，不能把前一個人的扣款算到新帳號頭上
+    ok('★ 換帳號不沿用別人的待送匣',
+       Object.keys(P.planOutboxInc(有點擊, '別人', { fish:-42 }).items).length === 0);
 
     // 重現那個危機：剛登入時本地只有 onSignedIn 寫的那三個欄位，
     // 這份「文件存在但幾乎是空的」快照如果被當真，會讀成什麼。

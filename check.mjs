@@ -101,8 +101,20 @@ const check = (name, ok, detail = '') => {
   // 待送量和待送匣要用同一個 key 記。不同的話，結清時會找不到那一筆，
   // 它就永遠留在待送匣裡，每次重開再加一次 —— 魚永遠用不完（DEVLOG 第 25 條）。
   check('待送量和待送匣記同一個對象',
-        /pendAdd\(targetUid, 1, r\.gained/.test(store)
-        && /outboxAdd\(me\.uid, targetUid, 1, r\.gained/.test(store));
+        /pendAdd\(targetUid, 1, earned,/.test(store)
+        && /outboxAdd\(me\.uid, targetUid, 1, earned,/.test(store));
+  // 攤倒給的魚以前只加在本機的 me.fish 上，從來沒進佇列 ——
+  // 伺服器沒收到，下一次快照重算就把它抹掉，玩家看到「150 過一陣子自己消失」。
+  check('攤倒給的魚也會送出去',
+        /const earned = r\.gained \+ \(r\.flatFish \|\| 0\);/.test(store));
+  // 買東西的扣款只活在模組變數裡的話，停手那 6 秒內重整就沒了：
+  // 禮物照樣送出（信箱是立刻寫的），魚卻退回來，等於白拿。
+  check('扣款會存進待送匣', /const queueInc   = \(f, n\) => \{ pendInc\[f\] = \(pendInc\[f\] \|\| 0\) \+ n; saveInc\(\); \};/.test(store)
+        && /const saveInc = \(\) => outboxSaveInc\(state\.me\.uid, pendIncAll\(\)\);/.test(store));
+  // 存快照不存累加 —— 送出失敗時那批會退回 pendInc，累加的話就變兩倍。
+  check('待送匣的扣款存的是當下數字',
+        /outboxWrite\(planOutboxInc\(outboxRead\(\), uid, inc\)\);/.test(store)
+        && /if \(Object\.keys\(clean\)\.length\) o\.inc = clean; else delete o\.inc;/.test(plan));
   check('待送量照對象分開記', /let pendBy = \{\};/.test(store));
   check('一次只送一個對象', /const target = pendPick\(\);/.test(store));
   check('結清用的是送出的那個對象',

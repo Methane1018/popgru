@@ -771,6 +771,62 @@ export const ignoreSnapshot = (loaded, fromCache) => !loaded && !!fromCache;
 4. **加欄位的那一刻就產生了兩種使用者。** `absAt` 讓新資料能自我修復，
    但也讓「沒有 absAt 的舊資料」變成一個沒人想過的受害族群。
 
+## 31. 兩筆沒進佇列的魚
+
+同一天回報的兩個症狀，成因是同一句話：**有些魚的增減沒有走「會被存起來」那條路。**
+
+### 攤倒給的 150 會自己消失
+
+```js
+if (Math.random() < 1 / flatOdds()) {
+  r.flat = true;
+  r.flatFish = TUNING.flatFish;
+  me.fish += r.flatFish;        // ← 只加在本機
+}
+...
+pendAdd(targetUid, 1, r.gained, ...);        // ← 只送 r.gained
+outboxAdd(me.uid, targetUid, 1, r.gained, ...);
+```
+
+`me.fish` 立刻 +150，畫面也跳出「😵 格魯攤了 · 🐟 150」。但佇列裡只有 `r.gained`，
+伺服器從來沒收到那 150。下一次快照重算 `fish = 伺服器 + 待送` 時，它就被抹掉了。
+
+「過一陣子之後消失」聽起來像逾時或快取，其實是**下一次快照**。
+凡是「本機先加、之後自己變回去」的症狀，看的都是同一個地方：那筆有沒有進佇列。
+
+### 買東西後馬上重整，魚會退回來
+
+`queueInc('fish', -cost)` 之後是 `scheduleFlush()`，而 `quietFlushMs` 是 6 秒。
+`pendInc` 只是個模組變數 —— 待送匣只存 `{n, fish, gold}`，沒有它的位置。
+那 6 秒內重整，扣款就不存在了。
+
+而禮物是 `b.commit()` 立刻寫出去的。所以順序是：**禮物送到，錢沒扣。**
+送人一次重整一次，等於白拿。
+
+**修法**：待送匣加一個「增減」區。關鍵是它存的是**當下的完整數字，不是累加** ——
+送出失敗時那批會退回 `pendInc`，之後又存一次，累加的話一次失敗就變兩倍。
+
+```js
+export function planOutboxInc(prev, uid, inc) {
+  const o = (prev && prev.uid === uid) ? { ...prev } : { uid, items: {} };
+  const clean = {};
+  for (const [f, v] of Object.entries(inc || {})) if (v) clean[f] = v;
+  if (Object.keys(clean).length) o.inc = clean; else delete o.inc;
+  return o;
+}
+```
+
+**學到的**：
+
+1. **「本機先加、之後變回去」永遠是同一種 bug。** 不是逾時、不是快取、不是網路，
+   是那筆沒進佇列，而下一次快照用伺服器的值重算。以後聽到「過一陣子消失」
+   就直接去看佇列，不要再從別的方向猜。
+2. **待送匣當初只為點擊設計，後來長出來的東西沒人補進去。** 扣款、信箱領到的魚
+   都是後來才有的，它們各自都合理，就是沒有人回頭問「這個撐得過重整嗎」。
+   以後每加一種資源變動，都要先回答這一題。
+3. **退回機制會把「累加 vs 快照」這個選擇變成 bug。** 只要某批可能被重送，
+   落地的紀錄就必須是冪等的。這跟第 25 條（待送匣孤兒）是同一類。
+
 ## 資料庫用量
 
 每次 flush 寫三份文件（`users` / `grus` / `meta/global`），三份都掛 `onSnapshot` ——

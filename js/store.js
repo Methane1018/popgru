@@ -10,12 +10,12 @@ import {
   ACCESS, INVITE_CODE, DEFAULT_GRU_NAME, hatInfo, skinInfo, defaultSkin, clampQty, MAX_QTY,
   TREASURES, RARITY, treasureInfo, SKINS,
   SKILLS, AXES, SP_STEPS, MILESTONES, skillInfo, skillNeeds,
-} from './config.js?v=0.15.2';
+} from './config.js?v=0.15.3';
 import {
   planFlush, planSnapshot, pendingFor, isInc, isUnion, isNow,
   NO_NAME, realName, mergeOwned, mergeCounts, readHelped, absFingerprint,
-  pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS, ignoreSnapshot, looksComplete,
-} from './plan.js?v=0.15.2';
+  pickMirror, srvAbsolutes, preferMirror, ABSOLUTE_FIELDS, ignoreSnapshot, looksComplete, planOutboxInc,
+} from './plan.js?v=0.15.3';
 // 這幾個是純決策，定義在 plan.js；這裡轉出去讓呼叫端和測試照舊拿得到
 export { mergeOwned, mergeCounts, readHelped, pickMirror };
 
@@ -181,7 +181,10 @@ function outboxRead() {
 }
 function outboxWrite(o) {
   try {
-    if (!o || !o.items || !Object.keys(o.items).length) localStorage.removeItem(OUTBOX_KEY);
+    // 增減區（買東西的扣款）也算數 —— 只看點擊的話，
+    // 一筆「沒有待送點擊、但有還沒送出的扣款」會被整個刪掉。
+    const empty = !o || (!Object.keys(o.items || {}).length && !Object.keys(o.inc || {}).length);
+    if (empty) localStorage.removeItem(OUTBOX_KEY);
     else localStorage.setItem(OUTBOX_KEY, JSON.stringify(o));
   } catch {}
 }
@@ -204,6 +207,16 @@ function outboxSettle(uid, target, n, fish, gold) {
   it.n -= n; it.fish -= fish; it.gold -= gold;
   if (it.n <= 0 && it.fish <= 0 && it.gold <= 0) delete o.items[target];
   outboxWrite(o);
+}
+
+// 待送匣的「增減」區：買東西的扣款、信箱領到的魚。這些沒有對象，所以另外存。
+//
+// ⚠️ 存的是**當下的完整數字**，不是累加。
+// 因為送出失敗時那批會退回 pendInc，如果這裡用累加就會變成兩倍。
+// 存快照的話，重複呼叫幾次都一樣。
+function outboxSaveInc(uid, inc) {
+  if (!uid) return;
+  outboxWrite(planOutboxInc(outboxRead(), uid, inc));
 }
 
 /* ------------------------------------------------- 絕對值欄位的本機鏡像 -- */
@@ -535,8 +548,13 @@ async function recoverOutbox(uid) {
   recoveredFor = uid;
   const o = outboxRead();
   if (!o || o.uid !== uid) return;
+  // 先把沒有對象的增減（買東西的扣款）接回來。
+  // 這要在點擊那段之前做，而且不能被「沒有待送點擊就 return」擋掉。
+  for (const [f, v] of Object.entries(o.inc || {})) {
+    if (v) { pendInc[f] = (pendInc[f] || 0) + v; console.log(`POPGRU 補回未送出的 ${f} ${v > 0 ? '+' : ''}${v}`); }
+  }
   const targets = Object.keys(o.items || {});
-  if (!targets.length) return;
+  if (!targets.length) { if (hasPending()) scheduleFlush(); return; }
   let total = 0;
   for (const t of targets) {
     const it = o.items[t];
@@ -700,8 +718,13 @@ export function squash() {
     // 格魯和小圈子總數兩份就被整個跳過，只有個人資料寫得出去。
     const targetUid = v.isMine ? (state.me.uid || v.uid) : v.uid;
     // 記在這個對象名下。換對象不用先送出 —— 兩邊各自累積，flush 一次送一個。
-    pendAdd(targetUid, 1, r.gained, r.goldfish ? 1 : 0);
-    outboxAdd(me.uid, targetUid, 1, r.gained, r.goldfish ? 1 : 0);   // 先落地再說
+    // ⚠️ 這一下賺到的魚**全部**都要進佇列，包含攤倒給的那筆。
+    // 之前只送 r.gained，攤倒的 150 只加在本機的 me.fish 上 ——
+    // 伺服器從來沒收到，所以下一次快照重算就把它抹掉了。
+    // 症狀：攤倒給的 150 過一陣子自己消失。
+    const earned = r.gained + (r.flatFish || 0);
+    pendAdd(targetUid, 1, earned, r.goldfish ? 1 : 0);
+    outboxAdd(me.uid, targetUid, 1, earned, r.goldfish ? 1 : 0);   // 先落地再說
     scheduleFlush();                     // 停手 1.5 秒就寫出去，不要等滿 8 秒
     if (state.pending >= TUNING.maxPerFlush) flush();
   } else {
@@ -762,6 +785,10 @@ const pendIncAll = () => {
   for (const [f, v] of Object.entries(pendInc)) out[f] = (out[f] || 0) + v;
   return out;
 };
+// 把「還沒被伺服器確認的增減」整份存進待送匣。
+// 送出中的那批也要算 —— 送出途中重整的話，那批就只剩這裡有紀錄。
+const saveInc = () => outboxSaveInc(state.me.uid, pendIncAll());
+
 // 對外只是為了看得見（測試與主控台除錯用）
 export const pendingDelta = f => pendIncOf(f);
 let failCount = 0, blockedLogged = false;
@@ -797,7 +824,9 @@ function materialize(obj, F) {
   return out;
 }
 
-const queueInc   = (f, n) => { pendInc[f] = (pendInc[f] || 0) + n; };   // 相加
+// 排隊中的增減。每次變動都順手落地 —— 不然停手的那 6 秒內重整，
+// 扣款就沒了：禮物照樣送出去（信箱是立刻寫的），魚卻退回來，等於白拿。
+const queueInc   = (f, n) => { pendInc[f] = (pendInc[f] || 0) + n; saveInc(); };
 const queueUnion = (f, v) => { (pendUnion[f] ||= new Set()).add(v); };  // 取聯集
 const queueSet   = (f, v) => { pendSet[f] = v; };                       // 絕對值，新的贏
 const hasPend = () => pendReconcile
@@ -876,6 +905,7 @@ export async function flush() {
   } finally {
     flushing = false;
     inflight = { n:0, fish:0, gold:0 };
+    saveInc();                  // 成功就剩下沒送的，失敗就是全部退回來的
     inflightInc = {};
     if (pendPick()) scheduleFlush();             // 還有別的對象在排隊
     if (state.pending || pendFish || pendGold) scheduleFlush();   // 期間又累積了就再送

@@ -166,6 +166,21 @@ export const ignoreSnapshot = (loaded, fromCache) => !loaded && !!fromCache;
 export const looksComplete = (d, keys) =>
   !!d && keys.some(k => d[k] !== undefined && d[k] !== null);
 
+/**
+ * 待送匣裡「沒有對象的增減」該長什麼樣（買東西的扣款、信箱領到的魚）。
+ *
+ * ⚠️ 存的是**當下的完整數字**，不是在舊值上累加。
+ * 送出失敗時那批會退回 pendInc，之後又存一次 —— 如果這裡用累加，
+ * 一次失敗就會讓扣款變成兩倍。存快照的話，重複幾次都一樣。
+ */
+export function planOutboxInc(prev, uid, inc) {
+  const o = (prev && prev.uid === uid) ? { ...prev } : { uid, items: {} };
+  const clean = {};
+  for (const [f, v] of Object.entries(inc || {})) if (v) clean[f] = v;
+  if (Object.keys(clean).length) o.inc = clean; else delete o.inc;
+  return o;
+}
+
 export const NO_NAME = '無名氏';
 export const realName = v =>
   (typeof v === 'string' && v.trim() && v.trim() !== NO_NAME) ? v.trim() : null;
