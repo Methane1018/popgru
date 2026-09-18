@@ -1,7 +1,7 @@
 // ============================================================================
 //  app.js —— 畫面與互動。所有資料都跟 store.js 要。
 // ============================================================================
-import * as S from './store.js?v=0.15.3';
+import * as S from './store.js?v=0.15.4';
 import {
   TUNING, ITEMS, MILESTONES, HATS, clampQty,
   ACCESS, DEFAULT_GRU_NAME, APP_VERSION, CHANGELOG,
@@ -9,7 +9,7 @@ import {
   TREASURES, RARITY, SOURCE_LABEL, EGG_TAG, tagOf, treasureHow,
   SKILLS, AXES, CROSS, SP_STEPS, skillNeeds,
   TREE_COLS, TREE_ROWS, SKILL_ROOT, treeEdges, treePos,
-} from './config.js?v=0.15.3';
+} from './config.js?v=0.15.4';
 
 console.log(`%cPOPGRU v${APP_VERSION}`, 'font-weight:bold');
 
@@ -22,8 +22,29 @@ function markVersionSeen() {
 }
 
 const $  = id => document.getElementById(id);
+// 🥇 在程式碼裡是「金魚」的記號，畫出來是一條金色的 🐟。
+//
+// Unicode 沒有金色的魚 —— 🐟 是藍的、🐠 是橘的。所以用同一顆 🐟 加 CSS 濾鏡
+// 轉成金色（見 index.html 的 .goldfish）。濾鏡需要一個元素，純文字做不到，
+// 所以在這裡統一換掉：呼叫端照常傳 `🥇 12` 這種純字串，不必知道這件事。
+const GOLD_MARK = '🥇';
+function setText(n, text) {
+  const str = String(text);
+  if (!str.includes(GOLD_MARK)) { n.textContent = str; return n; }
+  n.textContent = '';
+  str.split(GOLD_MARK).forEach((part, i) => {
+    if (i) {
+      const g = document.createElement('span');
+      g.className = 'goldfish'; g.textContent = '🐟';
+      n.append(g);
+    }
+    if (part) n.append(document.createTextNode(part));
+  });
+  return n;
+}
+
 const el = (tag, cls, text) => { const n = document.createElement(tag);
-  if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  if (cls) n.className = cls; if (text != null) setText(n, text); return n; };
 const nf = n => (n || 0).toLocaleString('en-US');
 // 舊版可能把「無名氏」寫進別人的 ownerName，顯示時當成沒設定
 const who = (v, fallback = '某人') =>
@@ -236,7 +257,7 @@ setInterval(() => S.flush(), TUNING.flushMs);
 let toastTimer = null;
 function toast(msg) {
   const t = $('toast');
-  t.textContent = msg;
+  setText(t, msg);
   t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
@@ -294,8 +315,8 @@ function render() {
   // 不能取整數：門檻 350 的時候壓一下只有 0.28%，取整就永遠是 0，
   // 看起來像進度條壞掉
   $('goldFill').style.width = (S.goldfishProgress() * 100).toFixed(2) + '%';
-  $('goldText').textContent =
-    `距離下一條 🥇 金魚還有 ${nf(Math.max(0, gOdds - (st.me.goldTick || 0)))} 下`;
+  setText($('goldText'),
+    `距離下一條 🥇 金魚還有 ${nf(Math.max(0, gOdds - (st.me.goldTick || 0)))} 下`);
   $('goldBar').hidden = false;
 
   // --- 格魯 ---
@@ -322,13 +343,13 @@ function render() {
   $('statStreak').textContent = `${alive ? '🔥' : '💤'} ${me.streak || 0} 天`;
   $('statFish').textContent   = `🐟 ${nf(me.fish)}`;
   $('statMine').textContent   = `⭐️ ${nf(me.lifetime)}`;
-  $('statExtra').textContent  = [
+  setText($('statExtra'), [
     helpLeft !== Infinity ? `🤝 ${nf(helpLeft)}` : '',
     me.goldfish ? `🥇 ${me.goldfish}` : '',
     me.freezes  ? `🧊 ${me.freezes}`  : '',
     me.double   ? `⚡ ${me.double}`   : '',
     me.medals   ? `🏅 ${me.medals}`   : '',
-  ].filter(Boolean).join('  ');
+  ].filter(Boolean).join('  '));
 
   if (!v.isMine && helpLeft === 0)
     $('hint').textContent = '額度用完了，還是可以壓爽的，只是不計分';
@@ -1184,7 +1205,7 @@ function showSpBuy() {
   const total = el('p', 'qty-total');
   const buy = el('button', 'btn primary', '');
   const q = qtyPicker(max, n => {
-    total.textContent = `花 ${nf(per * n)} 🥇 換 ${n} 點`;
+    setText(total, `花 ${nf(per * n)} 🥇 換 ${n} 點`);
     buy.textContent = `確定換 ${n} 點`;
   });
   body.append(el('p', 'note', '要換幾點？'), q.node, total);

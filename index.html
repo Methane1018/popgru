@@ -7,6 +7,16 @@
 <title>POPGRU — 壓扁格魯</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐧</text></svg>">
 <style>
+/* 🥇 金魚：Unicode 沒有金色的魚（🐟 是藍的、🐠 是橘的），
+   所以拿同一顆 🐟 用濾鏡染成金色。
+   grayscale 先把原本的藍色洗掉，之後的結果才跟來源顏色無關；
+   sepia 上底色（偏橘棕），所以 hue-rotate 要往**正的**轉才會到黃金；
+   負的會越轉越紅。contrast 讓小尺寸下的輪廓清楚一點。
+   想調色的話改這一行就好。 */
+.goldfish {
+  display: inline-block;
+  filter: grayscale(1) sepia(1) saturate(5) hue-rotate(12deg) brightness(1.2) contrast(1.25);
+}
   :root{
     --bg:#eaf2f8; --bg-2:#d7e6f1; --ink:#16242f; --muted:#65798a;
     --card:#fff; --line:#c9dae7; --accent:#1f6ea8; --accent-ink:#fff;
@@ -494,6 +504,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script type="module" src="js/app.js?v=0.15.3"></script>
+<script type="module" src="js/app.js?v=0.15.4"></script>
 </body>
 </html>

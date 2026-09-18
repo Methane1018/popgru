@@ -96,6 +96,19 @@ const check = (name, ok, detail = '') => {
   check('沒有人再用「文件不存在」當防線',
         !/!s\.exists\(\) && s\.metadata\.fromCache/
           .test(store.replace(/^\s*\/\/.*$/gm, '')));
+  // 🥇 在字串裡是「金魚」的記號，畫出來要變成金色的 🐟。
+  // 換掉的地方只有 setText 一個 —— 有人繞過它直接寫 textContent 的話，
+  // 那一處就會露出金牌，而且不會有任何錯誤訊息。
+  {
+    const 漏網 = app.split('\n')
+      .map((l, i) => [i + 1, l])
+      .filter(([, l]) => /textContent\s*=/.test(l) && l.includes('🥇'));
+    check('沒有人繞過 setText 直接寫金魚',
+          !漏網.length, 漏網.map(([i]) => `第 ${i} 行`).join('、'));
+    check('setText 認得金魚記號',
+          /const GOLD_MARK = '🥇';/.test(app) && /g\.className = 'goldfish';/.test(app));
+    check('金魚有上色', /\.goldfish \{/.test(html));
+  }
   check('在自己家時寫入對象用自己的 uid',
         /const targetUid = v\.isMine \? \(state\.me\.uid \|\| v\.uid\) : v\.uid;/.test(store));
   // 待送量和待送匣要用同一個 key 記。不同的話，結清時會找不到那一筆，
