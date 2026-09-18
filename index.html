@@ -15,7 +15,10 @@
    想調色的話改這一行就好。 */
 .goldfish {
   display: inline-block;
-  filter: grayscale(1) sepia(1) saturate(5) hue-rotate(12deg) brightness(1.2) contrast(1.25);
+  /* 🐟 的字形幾乎填滿整個字框，🥇 卻是窄窄一顆中間帶留白 ——
+     直接換過去的話，左右的字看起來會突然擠在一起。補一點外距補回來。 */
+  margin: 0 .08em;
+  filter: grayscale(1) sepia(1) saturate(5) hue-rotate(12deg) brightness(1.12) contrast(1.25);
 }
   :root{
     --bg:#eaf2f8; --bg-2:#d7e6f1; --ink:#16242f; --muted:#65798a;
